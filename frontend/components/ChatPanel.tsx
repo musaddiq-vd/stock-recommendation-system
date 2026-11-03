@@ -1,6 +1,29 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+// Compact dark styling for agent answers: tables scroll sideways instead of overflowing the panel
+const MD: Components = {
+  table: ({ children }) => (
+    <div className="my-2 overflow-x-auto rounded-lg border border-zinc-700">
+      <table className="w-full text-xs">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-zinc-800 text-zinc-300">{children}</thead>,
+  th: ({ children }) => <th className="px-2 py-1.5 text-left font-semibold whitespace-nowrap">{children}</th>,
+  td: ({ children }) => <td className="px-2 py-1.5 border-t border-zinc-800 whitespace-nowrap tabular-nums">{children}</td>,
+  h1: ({ children }) => <h3 className="mt-2 mb-1 text-sm font-semibold text-white">{children}</h3>,
+  h2: ({ children }) => <h3 className="mt-2 mb-1 text-sm font-semibold text-white">{children}</h3>,
+  h3: ({ children }) => <h4 className="mt-2 mb-1 text-sm font-semibold text-white">{children}</h4>,
+  p: ({ children }) => <p className="my-1.5 leading-relaxed">{children}</p>,
+  ul: ({ children }) => <ul className="my-1.5 ml-4 list-disc space-y-1">{children}</ul>,
+  ol: ({ children }) => <ol className="my-1.5 ml-4 list-decimal space-y-1">{children}</ol>,
+  strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+  hr: () => <hr className="my-2 border-zinc-700" />,
+  a: ({ children, href }) => <a href={href} target="_blank" className="text-sky-400 hover:underline">{children}</a>,
+  blockquote: ({ children }) => <blockquote className="my-1.5 border-l-2 border-amber-600 pl-2 text-zinc-400">{children}</blockquote>,
+};
 import { API } from "@/lib/api";
 
 type Msg = { role: "user" | "assistant"; content: string; tools?: string[] };
@@ -89,8 +112,8 @@ export default function ChatPanel() {
                 </div>
               )}
               {m.content ? (
-                <div className="prose prose-invert prose-sm max-w-none [&_p]:my-1 [&_ul]:my-1 [&_li]:my-0">
-                  <ReactMarkdown>{m.content}</ReactMarkdown>
+                <div className="chat-md">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD}>{m.content}</ReactMarkdown>
                 </div>
               ) : (
                 m.role === "assistant" && <span className="text-zinc-500 animate-pulse">Researching…</span>

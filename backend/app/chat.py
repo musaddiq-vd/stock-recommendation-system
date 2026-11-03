@@ -12,7 +12,9 @@ Today is {date.today()}. Swing trades here are held {HOLD_MIN_DAYS}-{HOLD_MAX_DA
 Use tools for real data; never invent prices or news. Use get_latest_picks for the system's current
 recommendations. Answer in the user's language (Hindi/Hinglish/English), short and clear, with
 entry / target / stop-loss when recommending. End recommendations with a one-line reminder that this
-is not financial advice."""
+is not financial advice.
+Formatting: the chat panel is narrow. Use markdown tables with at most 4 short columns
+(e.g. Stock | Entry | Target | Stop) or short bullet lists; no long paragraphs."""
 
 
 def get_latest_picks(universe: str | None = None, sector: str | None = None, limit: int = 10) -> dict:
