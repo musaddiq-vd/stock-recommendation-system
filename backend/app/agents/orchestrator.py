@@ -12,7 +12,9 @@ from .. import alerts, db
 from ..data import nse
 from ..data.events import window_event
 from ..data.live import live_quotes
-from ..config import AGENT_TOP_N, HOLD_MAX_DAYS, HOLD_MIN_DAYS, MIN_AVG_TRADED_VALUE
+from ..config import (AGENT_TOP_N, HOLD_MAX_DAYS, HOLD_MIN_DAYS, MIN_AVG_TRADED_VALUE, REGIME_FILTER, RUBRIC_MIN,
+                      SHORTS_ENABLED, STOP_ATR)
+from ..research.rubric_proxy import proxy_score
 from ..data.prices import benchmark, load_many
 from ..features import add_cross_sectional, add_nse, compute, trade_levels
 from ..model.train import load_model, prob_percentile
@@ -57,6 +59,8 @@ def score_universe() -> pd.DataFrame:
     data = add_cross_sectional(data)
     m = load_model()
     data["prob"] = m["model"].predict_proba(data[m["features"]].astype(float))[:, 1]
+    data["proxy_long"] = proxy_score(data, "long", STOP_ATR).values
+    data["proxy_short"] = proxy_score(data, "short", STOP_ATR).values
     try:
         ms = load_model("short")
         data["prob_short"] = ms["model"].predict_proba(data[ms["features"]].astype(float))[:, 1]
@@ -75,10 +79,11 @@ def hist_stats(prob: float, side: str = "long") -> dict:
     return best or {"win_rate": bt["base_win_rate"], "avg_ret": 0.0}
 
 
-def tier(score: float, verdict: str | None) -> str:
+def tier(score: float, verdict: str | None, gates_ok: bool = True) -> str:
+    """strong = high score + agent agrees + every historically validated gate passes."""
     if verdict == "avoid":
         return "avoid"
-    if score >= 85 and verdict in ("buy", "short", None):
+    if score >= 85 and verdict in ("buy", "short", None) and gates_ok:
         return "strong"
     if score >= 72 and verdict in ("buy", "short", None):
         return "good"
@@ -115,7 +120,7 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
                  f"(market regime: {market['regime']})")
         # Short ideas only when the market is not bullish, and only F&O stocks (futures needed to hold a short)
         lots = get_fo_lots()
-        if market["regime"] != "bullish" and lots and pool.prob_short.notna().any():
+        if SHORTS_ENABLED and market["regime"] != "bullish" and lots and pool.prob_short.notna().any():
             shorts = pool[pool.symbol.isin(lots)].sort_values("prob_short", ascending=False)
             n_short = max(3, top_n // 2)
             jobs += [(r, "short") for _, r in shorts.head(n_short).iterrows()]
@@ -147,7 +152,11 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
                     log_step(f"Agent error: {e}")
                     continue
                 ml_pct = prob_percentile(prob, side)
-                score = 0.55 * ml_pct + 0.45 * res["conviction"]
+                proxy = float(r.proxy_long if side == "long" else r.proxy_short)
+                # Score uses only parts validated on 22 years of walk-forward data: the ML rank and the
+                # rule-based rubric. An anonymised test showed the LLM's chart reading adds no edge, so the
+                # agent acts as a veto (red flags, bad news, results inside the window) instead.
+                score = 0.6 * ml_pct + 0.4 * proxy
                 if market["regime"] == ("bearish" if side == "long" else "bullish"):
                     score -= 8  # trading against the market trend
                 elif side == "short" and market["regime"] == "bearish":
@@ -161,17 +170,26 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
                     score -= 4
                 score = round(score, 1)
                 hs = hist_stats(prob, side)
+                # Gates that lifted win rate and cut drawdown over 22 years of walk-forward tests
+                regime_ok = (not REGIME_FILTER) or (market["above_ema200"] if side == "long" else not market["above_ema200"])
+                news = (res.get("scores") or {}).get("news_catalyst", 7.5)
+                agent_ok = not res.get("red_flags") and news > 4 and res.get("event_in_window") is not True
+                gates = {"regime": bool(regime_ok), "rubric": proxy >= RUBRIC_MIN, "agent": bool(agent_ok)}
+                verdict = "avoid" if res.get("red_flags") else ("buy" if side == "long" else "short") if agent_ok else "watch"
+                res["agent_verdict"], res["verdict"] = res.get("verdict"), verdict
                 picks.append({
                     "symbol": r.symbol, "name": r["name"], "sector": r.sector, "indices": r.indices, "side": side,
                     "lot_size": lots.get(r.symbol) if side == "short" else None, "official_event": official,
                     "as_of": str(pd.Timestamp(r.as_of).date()), "ml_prob": round(prob, 4),
                     "ml_percentile": ml_pct, "hist_win_rate": hs["win_rate"], "hist_avg_ret": hs["avg_ret"],
-                    "score": score, "tier": tier(score, res.get("verdict")), "levels": snap["trade_levels"],
+                    "score": score, "tier": tier(score, verdict, all(gates.values())), "levels": snap["trade_levels"],
+                    "rubric_score": round(proxy, 1), "gates": gates,
                     "hold_days": f"{HOLD_MIN_DAYS}-{HOLD_MAX_DAYS}",
                     "technicals": {k: v for k, v in snap.items() if k not in ("last_30_closes", "trade_levels")},
                     "research": res,
                 })
-                log_step(f"{r.symbol} [{side}]: {res.get('verdict')} (conviction {res['conviction']}) → score {score}")
+                log_step(f"{r.symbol} [{side}]: {verdict} (ML top {max(1, 100 - ml_pct)}%, rubric {proxy:.0f}, "
+                         f"gates {gates}) → score {score}")
         picks.sort(key=lambda p: -p["score"])
         db.save_picks(scan_id, picks)
         db.update_scan(scan_id, status="done")

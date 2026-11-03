@@ -284,3 +284,20 @@ def backtest_report():
                                            "comparison", "portfolio", "backtest")}
         out[side]["top_features"] = (r.get("feature_importance") or [])[:10]
     return out
+
+
+@app.get("/api/research")
+def research_summary():
+    """22-year walk-forward results of the live setting (built by `python -m app.research.analyze export`)."""
+    import json as _json
+
+    from .config import STORAGE
+
+    path = STORAGE / "research" / "summary.json"
+    if not path.exists():
+        raise HTTPException(404, "Run: python -m app.research.analyze export")
+    out = _json.loads(path.read_text())
+    llm = STORAGE / "research" / "llm_summary.json"
+    if llm.exists():
+        out["llm_test"] = _json.loads(llm.read_text())
+    return out
