@@ -115,32 +115,52 @@ def compute(df: pd.DataFrame, bench: pd.DataFrame | None = None) -> pd.DataFrame
     f["volatility_20"] = c.pct_change().rolling(20).std()
     f["up_days_10"] = (c.diff() > 0).rolling(10).sum()
     f["traded_value_20"] = (c * f.volume).rolling(20).mean()
+    f["low_20"] = f.low.rolling(20).min()
     return f
 
 
-def label(f: pd.DataFrame, horizon: int = HOLD_MAX_DAYS, side: str = "long") -> pd.DataFrame:
-    """Triple barrier: 1 if target hit before stop within `horizon` days.
-    side="short": target below entry, stop above. Records realised trade return (positive = profit)
-    and days held. Stop wins on same-day ties."""
-    c, h, l, atr = f.close.values, f.high.values, f.low.values, f.atr.values
-    sgn = 1 if side == "long" else -1
-    n = len(f)
-    y = np.full(n, np.nan)
+def barrier_outcomes(c, h, l, atr, target_atr: float, stop_atr: float, horizon: int, side: str = "long"):
+    """Vectorised triple barrier over all start days.
+
+    Returns (y, ret, days): y=1 if the target is hit before the stop within `horizon` bars, the realised
+    return (positive = profit) and bars held. Stop wins on same-bar ties; unresolved trades exit at the close
+    of the last bar. The last `horizon` rows are NaN (outcome unknown).
+    """
+    c, h, l, atr = (np.asarray(x, dtype=float) for x in (c, h, l, atr))
+    n = len(c)
+    sgn = 1.0 if side == "long" else -1.0
+    tgt = c + sgn * target_atr * atr
+    stp = c - sgn * stop_atr * atr
+    y = np.zeros(n)
     ret = np.full(n, np.nan)
-    days = np.full(n, np.nan)
-    for i in range(n - horizon):
-        tgt, stp = c[i] + sgn * TARGET_ATR * atr[i], c[i] - sgn * STOP_ATR * atr[i]
-        res, r, d = 0, sgn * (c[i + horizon] / c[i] - 1), horizon
-        for j in range(i + 1, i + horizon + 1):
-            stop_hit = l[j] <= stp if sgn == 1 else h[j] >= stp
-            tgt_hit = h[j] >= tgt if sgn == 1 else l[j] <= tgt
-            if stop_hit:
-                res, r, d = 0, sgn * (stp / c[i] - 1), j - i
-                break
-            if tgt_hit:
-                res, r, d = 1, sgn * (tgt / c[i] - 1), j - i
-                break
-        y[i], ret[i], days[i] = res, r, d
+    days = np.full(n, float(horizon))
+    open_ = np.ones(n, dtype=bool)
+    for j in range(1, horizon + 1):
+        hj = np.full(n, np.nan)
+        lj = np.full(n, np.nan)
+        hj[: n - j], lj[: n - j] = h[j:], l[j:]
+        stop_hit = open_ & ((lj <= stp) if sgn > 0 else (hj >= stp))
+        tgt_hit = open_ & ~stop_hit & ((hj >= tgt) if sgn > 0 else (lj <= tgt))
+        ret[stop_hit] = sgn * (stp[stop_hit] / c[stop_hit] - 1)
+        days[stop_hit] = j
+        ret[tgt_hit] = sgn * (tgt[tgt_hit] / c[tgt_hit] - 1)
+        y[tgt_hit] = 1
+        days[tgt_hit] = j
+        open_ &= ~(stop_hit | tgt_hit)
+    still = open_.copy()
+    still[n - horizon:] = False
+    ret[still] = sgn * (c[np.where(still)[0] + horizon] / c[still] - 1)
+    y[n - horizon:] = np.nan
+    ret[n - horizon:] = np.nan
+    days[n - horizon:] = np.nan
+    return y, ret, days
+
+
+def label(f: pd.DataFrame, horizon: int = HOLD_MAX_DAYS, side: str = "long",
+          target_atr: float = TARGET_ATR, stop_atr: float = STOP_ATR) -> pd.DataFrame:
+    """Adds y / trade_ret / days_held columns using the triple barrier (see barrier_outcomes)."""
+    y, ret, days = barrier_outcomes(f.close.values, f.high.values, f.low.values, f.atr.values,
+                                    target_atr, stop_atr, horizon, side)
     f = f.copy()
     f["y"], f["trade_ret"], f["days_held"] = y, ret, days
     return f
