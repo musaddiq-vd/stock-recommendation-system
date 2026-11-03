@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+yfinance
+pandas
+numpy
+lightgbm
+scikit-learn
+pyarrow
+joblib
+boto3
+python-dotenv
+ddgs
+feedparser
+apscheduler
+requests
+pytest

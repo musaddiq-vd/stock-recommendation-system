@@ -1,0 +1,31 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local data, models, database and logs (never commit: may contain tokens and large files)
+backend/storage/
+*.log
+*.db
+*.joblib
+*.parquet
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+*.tsbuildinfo
+next-env.d.ts
+
+# Editor / local tooling
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
