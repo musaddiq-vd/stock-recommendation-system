@@ -2,6 +2,12 @@
 import { Pick, TIER_STYLE } from "@/lib/api";
 import { inr, positionSize, Settings } from "@/lib/sizing";
 
+const GATE_HINT: Record<string, string> = {
+  regime: "Nifty above its 200-day average (cut max drawdown from -64% to -18% over 22 years)",
+  rubric: "Rule-based rubric score ≥ 70 (validated on 22 years)",
+  agent: "AI agent found no red flags, bad news or results inside the holding window",
+};
+
 export default function PickCard({ p, onOpen, settings }: { p: Pick; onOpen: () => void; settings: Settings | null }) {
   const s = TIER_STYLE[p.tier];
   const l = p.levels;
@@ -63,6 +69,16 @@ export default function PickCard({ p, onOpen, settings }: { p: Pick; onOpen: () 
 
       <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[11px] text-zinc-400">
         <span>ML top {Math.max(1, 100 - p.ml_percentile)}%</span>
+        {p.rubric_score != null && <span>Rubric {p.rubric_score}</span>}
+        {p.gates && (
+          <span className="flex gap-1">
+            {Object.entries(p.gates).map(([g, ok]) => (
+              <span key={g} title={GATE_HINT[g]} className={`rounded px-1 ${ok ? "bg-emerald-900/60 text-emerald-300" : "bg-zinc-800 text-zinc-500 line-through"}`}>
+                {g}
+              </span>
+            ))}
+          </span>
+        )}
         <span>Agent: <b className="text-zinc-200">{p.research.verdict}</b> ({p.research.conviction})</span>
         <span>Hold {p.hold_days}d</span>
         {p.research.setup && <span className="text-zinc-300">{p.research.setup}</span>}

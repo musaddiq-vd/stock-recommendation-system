@@ -90,9 +90,9 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 text-sm">
           <Stat k="Final score" v={pick.score.toFixed(0)} />
-          <Stat k="Agent conviction" v={`${r.conviction}/100`} />
+          <Stat k="Rubric (validated)" v={pick.rubric_score != null ? `${pick.rubric_score}/100` : "–"} />
           <Stat k="ML rank" v={`Top ${Math.max(1, 100 - pick.ml_percentile)}%`} />
-          <Stat k="Backtest win rate*" v={`${(pick.hist_win_rate * 100).toFixed(0)}%`} />
+          <Stat k="Target-hit rate*" v={`${(pick.hist_win_rate * 100).toFixed(0)}%`} />
         </div>
 
         <div ref={ref} className="mt-4 w-full h-[320px]" />
@@ -205,7 +205,7 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
           </Section>
         )}
         <p className="text-[11px] text-zinc-500 mt-6">
-          * Win rate of similar ML signals in the out-of-sample backtest (target hit before stop within 20 days).
+          * Share of similar ML signals that reached the full target before the stop within 20 days (out-of-sample).
           For education only, not financial advice.
         </p>
       </div>

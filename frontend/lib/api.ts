@@ -27,6 +27,8 @@ export interface Pick {
   side?: "long" | "short";
   lot_size?: number | null;
   official_event?: { purpose: string; date: string; desc: string } | null;
+  rubric_score?: number;
+  gates?: { regime: boolean; rubric: boolean; agent?: boolean };
   as_of: string;
   ml_prob: number;
   ml_percentile: number;

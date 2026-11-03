@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ColorType, createChart } from "lightweight-charts";
 import { get } from "@/lib/api";
+import LongTermBacktest from "./LongTermBacktest";
 
 interface Portfolio {
   threshold: number; slots: number; cost: number; total_return: number; max_drawdown: number; trades: number;
@@ -29,6 +30,8 @@ export default function BacktestPanel() {
 
   return (
     <div className="space-y-4">
+      <LongTermBacktest />
+      <div className="text-sm font-semibold text-zinc-200 pt-2">Latest model: last 12 months out-of-sample</div>
       <div className="flex gap-2">
         {(["long", "short"] as const).map((x) => (
           <button key={x} onClick={() => setSide(x)} className={`rounded-lg px-3 py-1.5 text-sm ${side === x ? (x === "long" ? "bg-emerald-700" : "bg-rose-700") + " text-white" : "text-zinc-400 border border-zinc-800"}`}>
