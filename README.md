@@ -29,12 +29,13 @@ researches each one with LLM agents, and tracks every call against real market d
 |---|---|---|
 | 🧮 | **ML screener** | A LightGBM model ranks ~480 liquid NSE stocks every day by the probability that a swing trade hits its target before its stop within 20 sessions. Separate models for **long** and **short** setups. |
 | 🤖 | **Research agents** | For the top candidates, LLM agents (AWS Bedrock) pull technicals, fundamentals, official NSE corporate events, news and web search, then score the trade on a fixed 7-factor rubric. |
-| 🟢 | **Confidence tiers** | Final score = ML rank + agent conviction, adjusted for market regime and event risk. High-probability picks are highlighted in green. |
-| 🔻 | **Short-sell ideas** | When the market is not bullish, F&O stocks are screened for short setups (with futures lot size), since multi-day shorts in India need stock futures. |
+| 🟢 | **Confidence tiers** | Final score = ML rank + a rule-based rubric, both validated on 22 years of walk-forward data. Green requires every gate: market regime, rubric and an AI agent veto check. |
+| 🔻 | **Short-sell ideas** *(off by default)* | F&O short setups with futures lot size. Disabled because they lost money in every configuration tested over 22 years; enable with `SHORTS_ENABLED=1`. |
 | 🧭 | **Market context** | Nifty regime (bullish / neutral / bearish), FII/DII net flows and a sector **money-flow heatmap**. |
 | 📐 | **Position sizing** | Risk-based sizing from your capital and risk-per-trade: shares or lots, capital used, max loss and target profit for every pick. |
 | 📝 | **Paper trading** | Open virtual trades from any pick. They auto-close at target, stop or the 20-day timeout, with live P&L. |
 | 🔔 | **Telegram alerts** | New high-probability picks, target/stop hits on recommendations, and paper-trade exits. |
+| 🔬 | **22-year research** | Walk-forward test from 2004 to 2026 on 30 years of data: 20 target/stop settings, regime and rubric filters, a random baseline and an anonymised LLM test. |
 | 📊 | **Backtest dashboard** | Out-of-sample equity curve vs Nifty, drawdown chart, monthly returns and a feature-set comparison. |
 | 💬 | **Research chat** | Ask about any stock or sector; the chat agent uses the same live tools and the latest scan. |
 | ⏰ | **Automation** | Daily scan after market close, intraday target/stop checks every 15 minutes, monthly model retraining. |
@@ -87,10 +88,11 @@ Every signal is a **triple-barrier** trade sized by volatility (ATR):
 |---|---|---|
 | Entry | Close of the signal day | Close of the signal day |
 | Target | Entry **+ 3.5 × ATR** | Entry **− 3.5 × ATR** |
-| Stop-loss | Entry **− 1.75 × ATR** | Entry **+ 1.75 × ATR** |
+| Stop-loss | Entry **− 2.5 × ATR** | Entry **+ 2.5 × ATR** |
 | Time limit | 20 trading days | 20 trading days |
 
-That gives a 2:1 reward-to-risk ratio and an average holding time of ~10–11 sessions. The ML label is simply
+This 1.4 : 1 reward-to-risk setting was chosen by the 22-year research below: it kept win rate above 50% with the best
+profit factor while holding trades for ~13 sessions on average (a third run the full 20 days). The ML label is simply
 *"did the target hit before the stop within 20 days?"*. When both are touched on the same day, the stop is assumed to hit first.
 
 ### 2. ML screener
@@ -117,38 +119,72 @@ Each shortlisted stock gets its own agent run (4 in parallel). The agent is told
 | Event risk | 10 | Official results / dividend dates inside the holding window |
 | Risk–reward | 10 | Stop beyond logical support, room to target |
 
-The code (not the LLM) sums the components into **conviction**: ≥ 65 → buy/short, 45–64 → watch, < 45 → avoid.
-Confirmed red flags (fraud, regulatory action, pledge spikes, defaults) force *avoid*. Official NSE event dates override
-the agent's own guess.
+The code (not the LLM) sums the components into **conviction**, shown on every pick.
+
+**What history said about the agent.** 200 past signals were shown to the LLM with the name, sector and dates hidden and
+prices rebased to 100. Its chart-based conviction did **not** separate winners from losers (AUC 0.48). The agent therefore
+does not add to the score. It acts as a **veto**: confirmed red flags (fraud, regulatory action, pledge spikes, defaults),
+clearly negative news, or results inside the holding window keep a pick out of the green tier. Reading news and filings is
+the part of its job that cannot be backtested, and official NSE event dates always override its own guess.
 
 ### 4. Final score and tiers
 ```
-score = 0.55 × ML percentile + 0.45 × agent conviction
+score = 0.6 × ML percentile + 0.4 × rule-based rubric
         − 8 when trading against the market regime
-        + 4 for shorts in a bearish market
         − 4 when results fall inside the holding window
 ```
-🟢 **High probability**: score ≥ 85 and the agent says buy/short · 🟩 **Good**: score ≥ 72 · ⚪ **Watch** · 🔴 **Avoid**
+🟢 **High probability**: score ≥ 85 **and** all gates pass: Nifty above its 200-day average, rubric ≥ 70, agent veto clear
+· 🟩 **Good**: score ≥ 72 · ⚪ **Watch** · 🔴 **Avoid** (red flag)
 
 ---
 
 ## 📊 Backtest results
 
-Out-of-sample period **Oct 2025 → Sep 2026** (data the model never saw during training). Costs of 0.2% per round trip included.
+### 22-year walk-forward (2004 → 2026)
+Prices from 1996 for 475 stocks. Every year is traded by a model trained only on earlier years, with a 10-slot portfolio and
+0.2% cost per trade. Filter thresholds were chosen on data before 2016; 2016–2026 is the out-of-sample check.
 
-<table>
-<tr><th></th><th>Long model</th><th>Short model</th></tr>
-<tr><td>Win rate, random stock (base rate)</td><td>21.7%</td><td>20.6%</td></tr>
-<tr><td>Win rate, top ~1% ML signals</td><td><b>33.7%</b></td><td><b>35.1%</b></td></tr>
-<tr><td>Avg return per signal (top ~1%)</td><td>+2.0%</td><td>+1.9%</td></tr>
-<tr><td>Portfolio return (10 slots, top 2% signals)</td><td><b>+10.6%</b></td><td><b>+17.2%</b></td></tr>
-<tr><td>Nifty 50, same period</td><td>−9.7%</td><td>−9.7%</td></tr>
-<tr><td>Max drawdown</td><td>−16.3%</td><td>−8.0%</td></tr>
-</table>
+| Strategy (long, target 3.5 / stop 2.5 ATR) | Trades | Win rate | Profit factor | Avg trade | Max drawdown | Win rate 2016+ |
+|---|---:|---:|---:|---:|---:|---:|
+| Random pick, same universe | 3,774 | 51.3% | 1.29 | +1.1% | −77% | 50.9% |
+| ML top 2% | 4,253 | 54.2% | 1.53 | +1.7% | −64% | 54.0% |
+| **ML + regime + rubric (live setting)** | **1,620** | **54.8%** | **1.61** | **+1.7%** | **−18%** | **53.0%** |
+
+Other findings:
+- **Win rate vs. profit:** smaller targets push win rate to 62–76%, but the profit factor drops and trades last only 6–9 days.
+  The live setting is the best balance of win rate above 50%, profit factor and a 15–20 day holding window.
+- **Market regime filter** (long only when Nifty is above its 200-day average) cut the worst drawdown from −64% to −18%.
+- **Short setups** lost money in all 20 target/stop settings over 22 years (profit factor 0.73–0.84), with or without filters.
+
+Reproduce with:
+```bash
+python -m app.research.history                 # download max price history (~5 min)
+python -m app.research.experiment build        # features + outcomes for 20 settings x 2 sides
+python -m app.research.experiment walk         # yearly walk-forward models
+python -m app.research.analyze long            # baseline vs filters, tuned before 2016, checked after
+python -m app.research.analyze export          # results shown in the Backtest tab
+python -m app.research.llm_backtest long 3.5 2.5   # anonymised LLM test (~200 Bedrock calls)
+```
+
+### Latest model, last 12 months
+Out-of-sample period **Oct 2025 → Sep 2026** with the live long setting (target 3.5 / stop 2.5 ATR), model trained on the
+previous five years. Costs of 0.2% per round trip included.
+
+| Long model | Value |
+|---|---:|
+| Target-hit rate, random stock | 23.8% |
+| Target-hit rate, top ~1% ML signals | **33.6%** |
+| Portfolio return (10 slots, top 2% signals) | **+14.3%** |
+| Nifty 50, same period | −9.7% |
+| Profitable trades after costs | 47.8% |
+| Max drawdown | −12.7% |
+
+**Win rate** in this README means trades that closed in profit after costs (at the target, or above entry at the 20-day exit).
+**Target-hit rate** counts only trades that reached the full target before the stop.
 
 > [!NOTE]
-> The ML edge is real but modest (AUC ≈ 0.53 long, 0.63 short), and a large part of the long-side return came from a single
-> month. The agent layer is **not** included in this backtest; use paper trading and the built-in outcome tracking to judge it.
+> Every row above uses today's Nifty 500 list, so stocks that were delisted are missing (survivorship bias). That flatters
+> absolute returns for every strategy, including the random baseline; compare strategies against each other.
 
 ---
 
@@ -206,7 +242,10 @@ All settings live in `backend/.env` (see `.env.example`). AWS credentials are re
 | `AWS_REGION` | `us-east-1` | Bedrock region |
 | `BEDROCK_MODEL_ID` | `moonshotai.kimi-k2.5` | Any Bedrock model that supports the Converse API with tool use |
 | `HOLD_MIN_DAYS` / `HOLD_MAX_DAYS` | `15` / `20` | Swing holding window |
-| `TARGET_ATR` / `STOP_ATR` | `3.5` / `1.75` | Barrier distances in ATR multiples |
+| `TARGET_ATR` / `STOP_ATR` | `3.5` / `2.5` | Barrier distances in ATR multiples |
+| `REGIME_FILTER` | `1` | Long picks can be green only when Nifty is above its 200-day average |
+| `RUBRIC_MIN` | `70` | Rule-based rubric score required for green |
+| `SHORTS_ENABLED` | `0` | Short-sell ideas (lost money historically) |
 | `AGENT_TOP_N` | `15` | Default number of stocks sent to the agents |
 
 In-app **Settings** (stored in the local database): capital, risk per trade %, F&O margin %, Telegram bot token and chat ID, alerts on/off.
@@ -331,6 +370,8 @@ Tests cover the absence of look-ahead in technical and NSE features, the triple-
 - Free data feeds can lag, change format or rate-limit. NSE may block cloud/datacenter IPs.
 - Short selling via futures has unlimited loss potential and margin requirements; sizing uses an approximate margin %.
 - Survivorship bias: the universe is today's index membership.
+- The LLM's news and fundamentals judgement cannot be backtested (no as-of-date news archive); only its chart reading was
+  tested, and it showed no edge. Treat the agent as a risk filter, not a source of alpha.
 
 ## 🛣️ Roadmap
 
