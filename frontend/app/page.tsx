@@ -8,19 +8,22 @@ import PickCard from "@/components/PickCard";
 import SettingsPanel from "@/components/SettingsPanel";
 import StockDrawer from "@/components/StockDrawer";
 import Login from "@/components/Login";
-import { AUTH_EVENT, get, getToken, Market, Pick, post, Scan, setToken, Tier } from "@/lib/api";
+import { AUTH_EVENT, get, getToken, Market, Pick, post, Scan, setToken, Tier, TierStats, tierStatsFrom } from "@/lib/api";
 import { Settings } from "@/lib/sizing";
 
 const UNIVERSES = ["NIFTY50", "NIFTY100", "NIFTY500"];
-type ModelReport = { auc: number; test_from: string; test_to: string; backtest: { base_win_rate: number; by_threshold: { threshold: number; trades: number; win_rate: number; avg_ret: number; avg_days: number }[] } };
 
 /** Shows the login screen when the API asks for one, otherwise the dashboard. */
 export default function Home() {
   const [state, setState] = useState<"checking" | "login" | "ok">("checking");
+  const [authRequired, setAuthRequired] = useState(false);
 
   useEffect(() => {
     get<{ auth_required: boolean }>("/api/auth/status")
-      .then((s) => setState(s.auth_required && !getToken() ? "login" : "ok"))
+      .then((s) => {
+        setAuthRequired(s.auth_required);
+        setState(s.auth_required && !getToken() ? "login" : "ok");
+      })
       .catch(() => setState("ok")); // API down: the dashboard shows its own errors
     const onAuth = () => setState("login");
     window.addEventListener(AUTH_EVENT, onAuth);
@@ -29,13 +32,12 @@ export default function Home() {
 
   if (state === "checking") return <div className="min-h-screen flex items-center justify-center text-sm text-zinc-500">Loading…</div>;
   if (state === "login") return <Login onDone={() => setState("ok")} />;
-  return <Dashboard />;
+  return <Dashboard authRequired={authRequired} />;
 }
 
-function Dashboard() {
+function Dashboard({ authRequired }: { authRequired: boolean }) {
   const [universe, setUniverse] = useState("NIFTY100");
   const [sector, setSector] = useState("");
-  const [mode, setMode] = useState<"news" | "technical">("news");
   const [topN, setTopN] = useState(12);
   const [sectors, setSectors] = useState<string[]>([]);
   const [market, setMarket] = useState<Market | null>(null);
@@ -43,8 +45,7 @@ function Dashboard() {
   const [scanId, setScanId] = useState<number | null>(null);
   const [open, setOpen] = useState<Pick | null>(null);
   const [tierFilter, setTierFilter] = useState<Tier | "all">("all");
-  const [report, setReport] = useState<ModelReport | null>(null);
-  const [shortReport, setShortReport] = useState<ModelReport | null>(null);
+  const [tierStats, setTierStats] = useState<TierStats>({});
   const [chatOpen, setChatOpen] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -55,8 +56,7 @@ function Dashboard() {
   useEffect(() => {
     get<{ sectors: string[] }>("/api/universe").then((d) => setSectors(d.sectors)).catch((e) => setErr(String(e)));
     get<Market>("/api/market").then(setMarket).catch(() => {});
-    get<ModelReport>("/api/model").then(setReport).catch(() => {});
-    get<ModelReport>("/api/model?side=short").then(setShortReport).catch(() => {});
+    get<{ variants: [] }>("/api/research").then((r) => setTierStats(tierStatsFrom(r))).catch(() => {});
     get<Settings>("/api/settings").then(setSettings).catch(() => {});
   }, []);
 
@@ -92,7 +92,7 @@ function Dashboard() {
   async function runScan() {
     setErr("");
     try {
-      const { scan_id } = await post<{ scan_id: number }>("/api/scan", { universe, sector: sector || null, mode, top_n: topN });
+      const { scan_id } = await post<{ scan_id: number }>("/api/scan", { universe, sector: sector || null, top_n: topN });
       setScanId(scan_id);
       poll(scan_id);
     } catch (e) {
@@ -101,19 +101,15 @@ function Dashboard() {
   }
 
   const picks = useMemo(
-    () => (scan?.picks || []).filter((p) => tierFilter === "all" || p.tier === tierFilter),
+    () => (scan?.picks || []).filter((p) => p.side !== "short" && (tierFilter === "all" || p.tier === tierFilter)),
     [scan, tierFilter],
   );
-  const longPicks = picks.filter((p) => p.side !== "short");
-  const shortPicks = picks.filter((p) => p.side === "short");
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
-    (scan?.picks || []).forEach((p) => (c[p.tier] = (c[p.tier] || 0) + 1));
+    (scan?.picks || []).filter((p) => p.side !== "short").forEach((p) => (c[p.tier] = (c[p.tier] || 0) + 1));
     return c;
   }, [scan]);
   const running = scan?.status === "running" || scanId !== null;
-  const best = report?.backtest.by_threshold.find((r) => r.threshold === 0.4);
-  const shortBest = shortReport?.backtest.by_threshold.find((r) => r.threshold === 0.4);
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -139,7 +135,7 @@ function Dashboard() {
               <button onClick={() => setShowSettings(true)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-900">
                 ⚙ Settings{settings?.telegram_configured ? " · 🔔" : ""}
               </button>
-              {getToken() && (
+              {authRequired && (
                 <button
                   onClick={() => {
                     setToken("");
@@ -168,12 +164,6 @@ function Dashboard() {
                 <option value="">All sectors</option>
                 {sectors.map((s) => <option key={s}>{s}</option>)}
               </select>
-            </Field>
-            <Field label="Research mode">
-              <div className="flex rounded-lg border border-zinc-800 overflow-hidden">
-                <button onClick={() => setMode("news")} className={`px-3 py-1.5 text-sm ${mode === "news" ? "bg-sky-700 text-white" : "text-zinc-400 hover:bg-zinc-900"}`}>Technical + News/Web</button>
-                <button onClick={() => setMode("technical")} className={`px-3 py-1.5 text-sm ${mode === "technical" ? "bg-sky-700 text-white" : "text-zinc-400 hover:bg-zinc-900"}`}>Technical only</button>
-              </div>
             </Field>
             <Field label={`Stocks to research: ${topN}`}>
               <input type="range" min={3} max={30} value={topN} onChange={(e) => setTopN(+e.target.value)} className="accent-emerald-500 w-32" />
@@ -209,12 +199,12 @@ function Dashboard() {
           {scan && (
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-zinc-400">
-                Scan #{scan.id} · {scan.universe}{scan.sector ? ` · ${scan.sector}` : ""} · {scan.mode === "news" ? "Technical + News" : "Technical"} · {scan.created_at.replace("T", " ")}
+                Scan #{scan.id} · {scan.universe}{scan.sector ? ` · ${scan.sector}` : ""} · {scan.created_at.replace("T", " ")}
               </span>
               <span className="flex-1" />
               {(["all", "strong", "good", "watch", "avoid"] as const).map((t) => (
                 <button key={t} onClick={() => setTierFilter(t)} className={`rounded-full px-3 py-1 text-xs border ${tierFilter === t ? "border-emerald-500 text-emerald-300" : "border-zinc-800 text-zinc-400"}`}>
-                  {t === "all" ? `All (${scan.picks.length})` : `${t} (${counts[t] || 0})`}
+                  {t === "all" ? `All (${Object.values(counts).reduce((a, b) => a + b, 0)})` : `${t} (${counts[t] || 0})`}
                 </button>
               ))}
             </div>
@@ -233,50 +223,34 @@ function Dashboard() {
           {scan?.status === "error" && <div className="text-red-400 text-sm">Scan failed: {scan.error}</div>}
 
           {picks.length > 0 ? (
-            <>
-              {longPicks.length > 0 && (
-                <section>
-                  <h2 className="text-sm font-semibold text-zinc-200 mb-3">Buy (long) ideas · {longPicks.length}</h2>
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {longPicks.map((p) => <PickCard key={`L-${p.symbol}`} p={p} settings={settings} onOpen={() => setOpen(p)} />)}
-                  </div>
-                </section>
-              )}
-              {shortPicks.length > 0 && (
-                <section className="pt-2">
-                  <h2 className="text-sm font-semibold text-rose-300">Short-sell ideas (market {scan?.market?.regime}) · {shortPicks.length}</h2>
-                  <p className="text-xs text-zinc-500 mb-3">
-                    F&O stocks only: a 15–20 day short needs stock futures (cash-market shorts are intraday only). Losses are not capped, so always use the stop-loss.
-                    {shortReport && <> Backtest: random short {(shortReport.backtest.base_win_rate * 100).toFixed(0)}% vs ML top signals {shortBest ? (shortBest.win_rate * 100).toFixed(0) : "–"}% win rate.</>}
-                  </p>
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {shortPicks.map((p) => <PickCard key={`S-${p.symbol}`} p={p} settings={settings} onOpen={() => setOpen(p)} />)}
-                  </div>
-                </section>
-              )}
-            </>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {picks.map((p) => (
+                <PickCard key={p.symbol} p={p} settings={settings} stat={tierStats[p.tier]} onOpen={() => setOpen(p)} />
+              ))}
+            </div>
           ) : (
             !running && (
               <div className="rounded-xl border border-dashed border-zinc-800 p-10 text-center text-zinc-500">
-                Pick a universe and sector, then press <b className="text-zinc-300">Run AI Scan</b>. The agents will research every shortlisted stock in depth.
+                Pick a universe and sector, then press <b className="text-zinc-300">Run AI Scan</b>. The research agent checks news, filings and result dates for every shortlisted stock.
               </div>
             )
           )}
 
-          {report && (
-            <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-400">
-              <div className="font-semibold text-zinc-200 mb-1">Model backtest (out-of-sample {report.test_from} → {report.test_to})</div>
-              Random pick win rate: {(report.backtest.base_win_rate * 100).toFixed(0)}% ·
-              {best && <> ML top ~1% signals: win rate {(best.win_rate * 100).toFixed(0)}%, avg {(best.avg_ret * 100).toFixed(1)}% per trade over {best.avg_days} days ({best.trades} trades)</>}
-              <div className="mt-2 flex flex-wrap gap-3">
-                <Legend cls="bg-emerald-500" t="High probability (score ≥ 85, agent says buy)" />
-                <Legend cls="bg-emerald-800" t="Good (score ≥ 72)" />
-                <Legend cls="bg-zinc-700" t="Watch" />
-                <Legend cls="bg-red-800" t="Avoid" />
-              </div>
-              <div className="mt-2 text-zinc-500">Educational tool, not financial advice. Past backtest results do not guarantee future returns.</div>
+          <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-400">
+            <div className="flex flex-wrap gap-3">
+              <Legend cls="bg-emerald-500" t="Top tier: score ≥ 85 and every gate passes (regime, rubric, agent)" />
+              <Legend cls="bg-emerald-800" t="Good: score ≥ 72, agent clear, Nifty above its 200-day average" />
+              <Legend cls="bg-zinc-700" t="Watch" />
+              <Legend cls="bg-red-800" t="Avoid: confirmed red flag" />
             </div>
-          )}
+            {tierStats.strong && (
+              <div className="mt-2">
+                Over 22 years of walk-forward tests, Top-tier trades closed in profit {(tierStats.strong.win_rate * 100).toFixed(0)}% of the
+                time with a profit factor of {tierStats.strong.profit_factor}. Expect losing trades; size every position with the stop-loss in mind.
+              </div>
+            )}
+            <div className="mt-2 text-zinc-500">Educational tool, not financial advice. Past results do not guarantee future returns.</div>
+          </div>
         </div>
         )}
       </main>

@@ -1,17 +1,22 @@
 "use client";
-import { Pick, TIER_STYLE } from "@/lib/api";
+import { Pick, TIER_STYLE, TierStat } from "@/lib/api";
 import { inr, positionSize, Settings } from "@/lib/sizing";
 
-const GATE_HINT: Record<string, string> = {
+export const GATE_HINT: Record<string, string> = {
   regime: "Nifty above its 200-day average (cut max drawdown from -64% to -18% over 22 years)",
   rubric: "Rule-based rubric score ≥ 70 (validated on 22 years)",
-  agent: "AI agent found no red flags, bad news or results inside the holding window",
+  agent: "Research agent found no red flags, no negative news and no results inside the holding window",
 };
 
-export default function PickCard({ p, onOpen, settings }: { p: Pick; onOpen: () => void; settings: Settings | null }) {
+const OUTCOME_STYLE: Record<string, string> = {
+  target: "text-emerald-400", stop: "text-red-400", timeout: "text-zinc-300", open: "text-sky-300",
+};
+
+export default function PickCard({ p, onOpen, settings, stat }: {
+  p: Pick; onOpen: () => void; settings: Settings | null; stat?: TierStat;
+}) {
   const s = TIER_STYLE[p.tier];
   const l = p.levels;
-  const short = p.side === "short";
   const size = positionSize(p, settings);
   return (
     <button
@@ -23,7 +28,6 @@ export default function PickCard({ p, onOpen, settings }: { p: Pick; onOpen: () 
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="font-semibold text-lg text-white">{p.symbol}</span>
             <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${s.badge}`}>{s.label}</span>
-            {short && <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-rose-600 text-white whitespace-nowrap">Short ↓</span>}
             {p.official_event && (
               <span title={p.official_event.desc} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-600/50 whitespace-nowrap">
                 📅 {p.official_event.purpose.split("/")[0].replace("Financial ", "")} {p.official_event.date.slice(5)}
@@ -32,7 +36,7 @@ export default function PickCard({ p, onOpen, settings }: { p: Pick; onOpen: () 
           </div>
           <div className="text-xs text-zinc-400 truncate">{p.name}</div>
           <div className="text-[11px] text-zinc-500 mt-0.5">
-            {p.sector} · {p.indices.filter((i) => i !== "NIFTY500").join(", ") || "NIFTY500"}
+            {p.sector} · {p.indices.filter((i) => i !== "NIFTY500").join(", ") || "NIFTY500"} · prices as of {p.as_of}
           </div>
         </div>
         <div className="text-right shrink-0">
@@ -43,23 +47,24 @@ export default function PickCard({ p, onOpen, settings }: { p: Pick; onOpen: () 
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mt-3 text-center">
-        <Lvl k={short ? "Sell at" : "Entry"} v={l.entry} />
-        <Lvl k="Target" v={l.target} sub={`${short ? "-" : "+"}${l.target_pct}%`} cls="text-emerald-400" />
-        <Lvl k="Stop" v={l.stop_loss} sub={`${short ? "+" : "-"}${l.stop_pct}%`} cls="text-red-400" />
-      </div>
-      {short && p.lot_size && (
-        <div className="mt-2 text-[11px] text-rose-300">
-          Futures lot: {p.lot_size} shares · 1 lot ≈ ₹{Math.round(p.lot_size * l.entry).toLocaleString("en-IN")} exposure
+      {stat && (
+        <div className="mt-2 text-[11px] text-emerald-200/90" title="22-year walk-forward result of picks in this tier, after 0.2% costs">
+          Past 22 yrs, this tier: {(stat.win_rate * 100).toFixed(0)}% trades profitable · profit factor {stat.profit_factor}{" "}
+          · worst drawdown {(stat.max_dd * 100).toFixed(0)}%
         </div>
       )}
+
+      <div className="grid grid-cols-3 gap-2 mt-3 text-center">
+        <Lvl k="Entry" v={l.entry} />
+        <Lvl k="Target" v={l.target} sub={`+${l.target_pct}%`} cls="text-emerald-400" />
+        <Lvl k="Stop" v={l.stop_loss} sub={`-${l.stop_pct}%`} cls="text-red-400" />
+      </div>
       {size && (
         <div className="mt-2 rounded-md bg-black/30 px-2 py-1.5 text-[11px] text-zinc-300">
           {size.qty > 0 ? (
             <>
-              <b className="text-white">{size.lots ? `${size.lots} lot (${size.qty} sh)` : `${size.qty} shares`}</b>
-              {" · "}{short ? "margin ~" : "invest "}{inr(size.invest)} · max loss <span className="text-red-400">{inr(size.maxLoss)}</span>
-              {" · "}target <span className="text-emerald-400">+{inr(size.profit)}</span>
+              <b className="text-white">{size.qty} shares</b> · invest {inr(size.invest)} · max loss{" "}
+              <span className="text-red-400">{inr(size.maxLoss)}</span> · target <span className="text-emerald-400">+{inr(size.profit)}</span>
             </>
           ) : (
             <span className="text-amber-300">{size.note}</span>
@@ -67,7 +72,7 @@ export default function PickCard({ p, onOpen, settings }: { p: Pick; onOpen: () 
         </div>
       )}
 
-      <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[11px] text-zinc-400">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-[11px] text-zinc-400">
         <span>ML top {Math.max(1, 100 - p.ml_percentile)}%</span>
         {p.rubric_score != null && <span>Rubric {p.rubric_score}</span>}
         {p.gates && (
@@ -79,15 +84,14 @@ export default function PickCard({ p, onOpen, settings }: { p: Pick; onOpen: () 
             ))}
           </span>
         )}
-        <span>Agent: <b className="text-zinc-200">{p.research.verdict}</b> ({p.research.conviction})</span>
-        <span>Hold {p.hold_days}d</span>
-        {p.research.setup && <span className="text-zinc-300">{p.research.setup}</span>}
         <span>News: {p.research.news_sentiment}</span>
+        <span>Hold up to {p.hold_days.split("-").pop()}d</span>
       </div>
       <p className="text-xs text-zinc-300 mt-2 line-clamp-3">{p.research.summary}</p>
-      {p.outcome && p.outcome !== "open" && (
+      {p.outcome && (
         <div className="mt-2 text-[11px] text-zinc-400">
-          Result: <b>{p.outcome}</b> {p.outcome_ret != null && `(${(p.outcome_ret * 100).toFixed(1)}%)`}
+          Result so far: <b className={OUTCOME_STYLE[p.outcome] || ""}>{p.outcome}</b>{" "}
+          {p.outcome_ret != null && `(${p.outcome_ret > 0 ? "+" : ""}${(p.outcome_ret * 100).toFixed(1)}%)`}
         </div>
       )}
     </button>

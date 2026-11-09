@@ -64,7 +64,7 @@ export default function PaperPanel({ refreshKey }: { refreshKey: number }) {
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
           <table className="w-full text-sm">
             <thead className="bg-zinc-900 text-[11px] uppercase text-zinc-500">
-              <tr>{["Stock", "Side", "Qty", "Entry", "Target / Stop", "Now / Exit", "P&L", "Status", ""].map((h) => <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>)}</tr>
+              <tr>{["Stock", "Qty", "Entry", "Target / Stop", "Now / Exit", "P&L", "Status", ""].map((h) => <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>)}</tr>
             </thead>
             <tbody>
               {pf.trades.map((t) => {
@@ -73,8 +73,7 @@ export default function PaperPanel({ refreshKey }: { refreshKey: number }) {
                 return (
                   <tr key={t.id} className="border-t border-zinc-800">
                     <td className="px-3 py-2 font-medium text-white">{t.symbol}<div className="text-[10px] text-zinc-500">{t.opened_on}</div></td>
-                    <td className={`px-3 py-2 ${t.side === "short" ? "text-rose-300" : "text-emerald-300"}`}>{t.side}</td>
-                    <td className="px-3 py-2">{t.qty}{t.lots ? <span className="text-zinc-500"> ({t.lots} lot)</span> : null}</td>
+                    <td className="px-3 py-2">{t.qty}</td>
                     <td className="px-3 py-2">₹{t.entry}</td>
                     <td className="px-3 py-2 text-xs"><span className="text-emerald-400">₹{t.target}</span> / <span className="text-red-400">₹{t.stop_loss}</span></td>
                     <td className="px-3 py-2">₹{open ? t.last_price ?? "–" : t.exit_price}{!open && <div className="text-[10px] text-zinc-500">{t.exit_date}</div>}</td>

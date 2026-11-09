@@ -3,11 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import { createChart, ColorType, LineStyle } from "lightweight-charts";
 import { get, Pick, post, TIER_STYLE } from "@/lib/api";
 import { inr, positionSize, Settings } from "@/lib/sizing";
+import { GATE_HINT } from "./PickCard";
 
 type Candle = { time: string; open: number; high: number; low: number; close: number; volume: number };
-const RUBRIC_MAX: Record<string, number> = {
-  trend: 20, momentum: 15, volume_flow: 15, fundamentals: 15, news_catalyst: 15, event_risk: 10, risk_reward: 10,
-};
+// rule-based rubric validated on 22 years (see app/research/rubric_proxy.py)
+const RUBRIC_MAX: Record<string, number> = { structure: 20, momentum: 15, volume: 15, risk_reward: 10 };
 
 export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }: {
   pick: Pick; onClose: () => void; settings: Settings | null; scanId?: number; onPaper: () => void;
@@ -15,18 +15,16 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
   const ref = useRef<HTMLDivElement>(null);
   const [fund, setFund] = useState<Record<string, unknown>>({});
   const size = positionSize(pick, settings);
-  const [qty, setQty] = useState(size?.qty || (pick.side === "short" ? pick.lot_size || 1 : 1));
+  const [qty, setQty] = useState(size?.qty || 1);
   const [paperMsg, setPaperMsg] = useState("");
 
   async function paperTrade() {
     setPaperMsg("");
     try {
-      const lot = pick.lot_size || 1;
-      const q = pick.side === "short" ? Math.max(lot, Math.round(qty / lot) * lot) : Math.max(1, Math.floor(qty));
+      const q = Math.max(1, Math.floor(qty));
       // the server opens at the current price, so a trade taken days after the scan stays honest
       const t = await post<{ entry: number; opened_on: string }>("/api/paper", {
-        symbol: pick.symbol, side: pick.side || "long", qty: q, lots: pick.side === "short" ? q / lot : null,
-        target: pick.levels.target, stop_loss: pick.levels.stop_loss, scan_id: scanId,
+        symbol: pick.symbol, qty: q, target: pick.levels.target, stop_loss: pick.levels.stop_loss, scan_id: scanId,
       });
       setPaperMsg(`Paper trade open: ${q} shares at ₹${t.entry} (${t.opened_on}) ✓`);
       onPaper();
@@ -81,7 +79,6 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
             <div className="flex items-center gap-2">
               <h2 className="text-2xl font-bold text-white">{pick.symbol}</h2>
               <span className={`text-xs px-2 py-0.5 rounded ${t.badge}`}>{t.label}</span>
-              {pick.side === "short" && <span className="text-xs px-2 py-0.5 rounded bg-rose-600 text-white">Short ↓ (F&O, lot {pick.lot_size})</span>}
             </div>
             <div className="text-sm text-zinc-400">{pick.name} · {pick.sector} · data as of {pick.as_of}</div>
           </div>
@@ -98,9 +95,9 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
         <div ref={ref} className="mt-4 w-full h-[320px]" />
 
         <div className="grid grid-cols-3 gap-2 mt-2 text-sm">
-          <Stat k={pick.side === "short" ? "Sell (short) at" : "Entry"} v={`₹${pick.levels.entry}`} />
-          <Stat k={`Target (${pick.side === "short" ? "-" : "+"}${pick.levels.target_pct}%)`} v={`₹${pick.levels.target}`} cls="text-emerald-400" />
-          <Stat k={`Stop (${pick.side === "short" ? "+" : "-"}${pick.levels.stop_pct}%)`} v={`₹${pick.levels.stop_loss}`} cls="text-red-400" />
+          <Stat k="Entry (last close)" v={`₹${pick.levels.entry}`} />
+          <Stat k={`Target (+${pick.levels.target_pct}%)`} v={`₹${pick.levels.target}`} cls="text-emerald-400" />
+          <Stat k={`Stop (-${pick.levels.stop_pct}%)`} v={`₹${pick.levels.stop_loss}`} cls="text-red-400" />
         </div>
 
         <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
@@ -109,61 +106,68 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
             <p className="text-xs text-zinc-400 mt-1">
               Capital {inr(+settings!.capital)} · risk {settings!.risk_pct}% = max loss {inr(size.riskAmt)} per trade.{" "}
               {size.qty > 0 ? (
-                <>Suggested: <b className="text-white">{size.lots ? `${size.lots} lot = ${size.qty} shares` : `${size.qty} shares`}</b>,{" "}
-                  {pick.side === "short" ? `margin ~${inr(size.invest)}, exposure ${inr(size.exposure)}` : `invest ${inr(size.invest)}`},
+                <>Suggested: <b className="text-white">{size.qty} shares</b>, invest {inr(size.invest)},
                   stop hit = <span className="text-red-400">-{inr(size.maxLoss)}</span>, target = <span className="text-emerald-400">+{inr(size.profit)}</span></>
               ) : <span className="text-amber-300">{size.note}</span>}
             </p>
           )}
           <div className="flex flex-wrap items-center gap-2 mt-3">
             <label className="text-xs text-zinc-400">Qty (shares)</label>
-            <input type="number" min={1} step={pick.side === "short" ? pick.lot_size || 1 : 1} value={qty}
+            <input type="number" min={1} step={1} value={qty}
               onChange={(e) => setQty(+e.target.value)}
               className="w-28 rounded-lg bg-zinc-950 border border-zinc-700 px-2 py-1 text-sm text-white" />
             <button onClick={paperTrade} className="rounded-lg bg-sky-700 hover:bg-sky-600 px-4 py-1.5 text-sm font-semibold text-white">
-              Paper trade {pick.side === "short" ? "(short)" : "(buy)"}
+              Paper trade (buy)
             </button>
             <span className="text-xs text-emerald-400">{paperMsg}</span>
           </div>
         </div>
 
-        <Section title={`Agent summary${r.setup ? ` · setup: ${r.setup}` : ""}`}><p className="text-zinc-300">{r.summary}</p></Section>
-
-        {r.scores && (
-          <Section title={`Agent scorecard: ${r.conviction}/100 (buy/short ≥ 65, watch ≥ 45)`}>
+        {pick.rubric_parts && (
+          <Section title={`Rule-based rubric: ${pick.rubric_score}/100 (validated on 22 years, needs ≥ 70)`}>
             <div className="space-y-1.5">
-              {Object.entries(r.scores).map(([k, v]) => {
+              {Object.entries(pick.rubric_parts).map(([k, v]) => {
                 const max = RUBRIC_MAX[k] ?? 15;
                 const f = v / max;
                 return (
-                  <div key={k} className="grid grid-cols-[110px_1fr_42px] items-center gap-2 text-xs">
+                  <div key={k} className="grid grid-cols-[110px_1fr_48px] items-center gap-2 text-xs">
                     <span className="text-zinc-400">{k.replace("_", " ")}</span>
-                    <div className="h-2 rounded bg-zinc-800 overflow-hidden" title={r.score_notes?.[k] || ""}>
+                    <div className="h-2 rounded bg-zinc-800 overflow-hidden">
                       <div className={`h-full ${f >= 0.65 ? "bg-emerald-500" : f >= 0.45 ? "bg-amber-500" : "bg-red-500"}`} style={{ width: `${f * 100}%` }} />
                     </div>
                     <span className="text-right text-zinc-300">{v}/{max}</span>
-                    {r.score_notes?.[k] && <span className="col-start-2 col-span-2 -mt-1 text-[11px] text-zinc-500">{r.score_notes[k]}</span>}
                   </div>
                 );
               })}
             </div>
-            {r.red_flags && r.red_flags.length > 0 && (
-              <div className="mt-2 rounded-lg border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200">
-                🚩 Red flags: {r.red_flags.join(" · ")}
-              </div>
-            )}
           </Section>
         )}
+
+        {pick.gates && (
+          <Section title="Gates (all must pass for Top tier)">
+            <ul className="text-xs space-y-1">
+              {Object.entries(pick.gates).map(([g, ok]) => (
+                <li key={g} className={ok ? "text-emerald-300" : "text-zinc-500"}>{ok ? "✓" : "✗"} <b>{g}</b>: {GATE_HINT[g]}</li>
+              ))}
+            </ul>
+          </Section>
+        )}
+
+        <Section title="Research agent (news, filings, events)">
+          <p className="text-zinc-300">{r.summary}</p>
+          <p className="text-zinc-400 text-xs mt-2">
+            News sentiment: <b className="text-zinc-200">{r.news_sentiment}</b> · Event risk: <b className="text-zinc-200">{r.event_risk}</b>
+          </p>
+          {r.red_flags && r.red_flags.length > 0 && (
+            <div className="mt-2 rounded-lg border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+              🚩 Red flags: {r.red_flags.join(" · ")}
+            </div>
+          )}
+        </Section>
         <div className="grid sm:grid-cols-2 gap-4">
           <Section title="Bull case"><List items={r.bull_case} cls="text-emerald-300" /></Section>
           <Section title="Bear case"><List items={r.bear_case} cls="text-red-300" /></Section>
         </div>
-        <Section title="Risk & levels">
-          <p className="text-zinc-300"><b>Event risk:</b> {r.event_risk}</p>
-          {r.key_levels && <p className="text-zinc-300 mt-1"><b>Levels:</b> {r.key_levels}</p>}
-          <p className="text-zinc-300 mt-1"><b>News sentiment:</b> {r.news_sentiment}</p>
-        </Section>
-
         <Section title="Fundamentals">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
             <Stat k="P/E" v={f("trailingPE")} /><Stat k="P/B" v={f("priceToBook")} />
@@ -177,7 +181,7 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
             {Object.entries(pick.technicals)
               .filter(([k]) => !["symbol", "date"].includes(k))
-              // nested groups (e.g. NSE delivery / F&O) are flattened into their own tiles
+              // older scans stored nested groups; flatten them into tiles
               .flatMap(([k, v]): [string, unknown][] =>
                 v && typeof v === "object" ? Object.entries(v as Record<string, unknown>) : [[k, v]])
               .map(([k, v]) => (

@@ -6,7 +6,6 @@ import { Settings } from "@/lib/sizing";
 export default function SettingsPanel({ s, onSaved, onClose }: { s: Settings; onSaved: (s: Settings) => void; onClose: () => void }) {
   const [capital, setCapital] = useState(s.capital);
   const [risk, setRisk] = useState(s.risk_pct);
-  const [margin, setMargin] = useState(s.margin_pct);
   const [alertsOn, setAlertsOn] = useState(s.alerts_enabled === "1");
   const [token, setToken] = useState("");
   const [chatId, setChatId] = useState(s.telegram_chat_id);
@@ -14,7 +13,7 @@ export default function SettingsPanel({ s, onSaved, onClose }: { s: Settings; on
 
   async function save() {
     setMsg("");
-    const body: Record<string, unknown> = { capital: +capital, risk_pct: +risk, margin_pct: +margin, alerts_enabled: alertsOn };
+    const body: Record<string, unknown> = { capital: +capital, risk_pct: +risk, alerts_enabled: alertsOn };
     if (token.trim()) body.telegram_bot_token = token.trim();
     if (chatId.trim()) body.telegram_chat_id = chatId.trim();
     let ns: Settings;
@@ -49,13 +48,12 @@ export default function SettingsPanel({ s, onSaved, onClose }: { s: Settings; on
         </div>
 
         <h3 className="mt-4 text-sm font-semibold text-zinc-200">Position sizing</h3>
-        <div className="grid grid-cols-3 gap-3 mt-2">
+        <div className="grid grid-cols-2 gap-3 mt-2">
           <Num label="Capital (₹)" v={capital} set={setCapital} />
           <Num label="Risk per trade %" v={risk} set={setRisk} step="0.25" />
-          <Num label="F&O margin %" v={margin} set={setMargin} />
         </div>
         <p className="text-[11px] text-zinc-500 mt-1">
-          Risk % = the most you lose (as % of capital) if the stop-loss hits. 1% is common. F&O margin is approximate, confirm with your broker.
+          Risk % = the most you lose (as % of capital) if the stop-loss hits. 1% is common.
         </p>
 
         <h3 className="mt-5 text-sm font-semibold text-zinc-200">Telegram alerts</h3>

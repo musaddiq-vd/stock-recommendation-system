@@ -2,19 +2,15 @@ export const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export type Tier = "strong" | "good" | "watch" | "avoid";
 
+/** What the research agent found. It can only hold a pick back; it does not score the chart. */
 export interface Research {
-  verdict: "buy" | "short" | "watch" | "avoid";
-  conviction: number;
-  scores?: Record<string, number>;
-  score_notes?: Record<string, string>;
-  red_flags?: string[];
-  setup?: string;
+  verdict: string; // buy | watch | avoid
   summary: string;
   bull_case: string[];
   bear_case: string[];
   news_sentiment: string;
   event_risk: string;
-  key_levels?: string;
+  red_flags?: string[];
   sources?: string[];
   steps?: { tool: string; input: Record<string, unknown> }[];
 }
@@ -24,10 +20,10 @@ export interface Pick {
   name: string;
   sector: string;
   indices: string[];
-  side?: "long" | "short";
-  lot_size?: number | null;
+  side?: string; // older scans may contain short picks; the dashboard hides them
   official_event?: { purpose: string; date: string; desc: string } | null;
   rubric_score?: number;
+  rubric_parts?: Record<string, number>;
   gates?: { regime: boolean; rubric: boolean; agent?: boolean };
   as_of: string;
   ml_prob: number;
@@ -131,9 +127,20 @@ export const TIER_STYLE: Record<Tier, { card: string; badge: string; label: stri
   strong: {
     card: "border-emerald-500 bg-emerald-950/60 shadow-[0_0_24px_-6px_rgba(16,185,129,0.6)]",
     badge: "bg-emerald-500 text-black",
-    label: "High probability",
+    label: "Top tier",
   },
   good: { card: "border-emerald-700/70 bg-emerald-950/25", badge: "bg-emerald-800 text-emerald-100", label: "Good" },
   watch: { card: "border-zinc-700 bg-zinc-900/60", badge: "bg-zinc-700 text-zinc-200", label: "Watch" },
   avoid: { card: "border-red-900/70 bg-red-950/20", badge: "bg-red-800 text-red-100", label: "Avoid" },
 };
+
+/** 22-year walk-forward result that backs each tier (from /api/research). */
+export interface TierStat { win_rate: number; profit_factor: number; max_dd: number; avg_trade: number; trades: number }
+export type TierStats = Partial<Record<Tier, TierStat>>;
+
+export function tierStatsFrom(research: { variants?: (TierStat & { name: string })[] } | null): TierStats {
+  const v = research?.variants || [];
+  const live = v.find((x) => x.name.includes("live setting"));
+  const good = v.find((x) => x.name.includes("Good tier"));
+  return { ...(live ? { strong: live } : {}), ...(good ? { good } : {}) };
+}

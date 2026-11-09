@@ -12,7 +12,7 @@ interface Research {
 }
 
 const pct = (v: number | null | undefined, d = 1) => (v == null ? "–" : `${v > 0 ? "+" : ""}${(v * 100).toFixed(d)}%`);
-const COLORS = ["#71717a", "#38bdf8", "#10b981"];
+const COLORS = ["#71717a", "#38bdf8", "#a3e635", "#10b981"];
 
 /** 22-year walk-forward results: each year scored by a model trained only on earlier years. */
 export default function LongTermBacktest() {
@@ -33,7 +33,7 @@ export default function LongTermBacktest() {
       timeScale: { borderColor: "#3f3f46" }, autoSize: true,
     });
     r.variants.forEach((v, i) => {
-      const s = chart.addLineSeries({ color: COLORS[i], lineWidth: i === 2 ? 2 : 1, title: v.name.split(" (")[0] });
+      const s = chart.addLineSeries({ color: COLORS[i], lineWidth: i === r.variants.length - 1 ? 2 : 1, title: v.name.split(" (")[0] });
       s.setData(v.equity.map((e) => ({ time: e.date, value: e.value * 100 })));
     });
     chart.timeScale().fitContent();
