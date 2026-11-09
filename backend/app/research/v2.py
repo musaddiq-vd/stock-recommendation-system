@@ -23,7 +23,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from ..config import HOLD_MAX_DAYS, STORAGE
-from ..features import BASE_FEATURES, add_cross_sectional, barrier_outcomes, compute, next_open_outcomes
+from ..features import BASE_FEATURES, PRICE_FEATURES, add_cross_sectional, barrier_outcomes, compute, next_open_outcomes
 from ..universe import get_universe
 from .experiment import portfolio
 from .rubric_proxy import proxy_score
@@ -70,7 +70,7 @@ def build(source: str = "pit") -> pd.DataFrame:
     bench = _benchmark(prices)
     b200 = bench.close / bench.close.ewm(span=200, adjust=False).mean() - 1
     sector = dict(zip(get_universe().symbol, get_universe().sector, strict=False))
-    keep = BASE_FEATURES[:-9] + ["close", "atr", "traded_value_20", "ema20", "ema50", "ema200", "low_20"]
+    keep = PRICE_FEATURES + ["close", "atr", "traded_value_20", "ema20", "ema50", "ema200", "low_20"]
     frames = []
     for i, (s, df) in enumerate(prices.items(), 1):
         if len(df) < 260:

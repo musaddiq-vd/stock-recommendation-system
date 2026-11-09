@@ -42,4 +42,4 @@ RUN_SCHEDULER = os.getenv("RUN_SCHEDULER", "1") == "1"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Bump when tiers or scoring rules change, so the live track record never mixes different rule sets
-SCORING_VERSION = "8"
+SCORING_VERSION = "9"

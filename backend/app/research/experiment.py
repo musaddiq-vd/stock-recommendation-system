@@ -13,7 +13,7 @@ import lightgbm as lgb
 import pandas as pd
 
 from ..config import HOLD_MAX_DAYS, STORAGE
-from ..features import BASE_FEATURES, add_cross_sectional, barrier_outcomes, compute
+from ..features import BASE_FEATURES, PRICE_FEATURES, add_cross_sectional, barrier_outcomes, compute
 from ..universe import get_universe
 from .history import benchmark, load_all
 
@@ -45,7 +45,7 @@ def build() -> pd.DataFrame:
     for i, (s, df) in enumerate(prices.items(), 1):
         f = compute(df, bench)
         f = f[f.traded_value_20 > 0]
-        keep = BASE_FEATURES[:-9] + ["close", "atr", "traded_value_20", "ema20", "ema50", "ema200", "low_20"]
+        keep = PRICE_FEATURES + ["close", "atr", "traded_value_20", "ema20", "ema50", "ema200", "low_20"]
         f["low_20"] = f.low.rolling(20).min()
         out = f[[c for c in dict.fromkeys(keep) if c in f]].astype("float32")
         for side in ("long", "short"):

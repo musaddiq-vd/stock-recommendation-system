@@ -13,7 +13,13 @@ FEATURES = [
 RANK_SOURCES = ["ret_20", "ret_60", "rs_60", "dist_52w_high", "vol_surge", "atr_pct", "adx14"]
 XS_FEATURES = [f"xr_{c}" for c in RANK_SOURCES] + ["sector_ret_20", "sector_rank"]
 MARKET_FEATURES = ["mkt_dist_ema200", "mkt_ret_20"]
-BASE_FEATURES = [c for c in FEATURES if c not in MARKET_FEATURES] + XS_FEATURES
+# Added in scoring version 9 after the 22-year walk-forward (app/research/feature_lab.py): profit factor
+# 1.50 -> 1.66 before 2016 (where it was chosen) and 1.30 -> 1.34 after, worst drawdown -23% -> -20%.
+NEW_PRICE_FEATURES = ["ret_120", "mom_12_1", "vol_ratio", "days_since_high", "clv_10", "dd_60", "sharpe_60"]
+NEW_XS_FEATURES = ["xr_mom_12_1", "xr_sharpe_60", "xr_liquidity", "rel_sector_20"]
+V8_FEATURES = [c for c in FEATURES if c not in MARKET_FEATURES] + XS_FEATURES
+PRICE_FEATURES = [c for c in FEATURES if c not in MARKET_FEATURES] + NEW_PRICE_FEATURES  # per-stock, no ranks
+BASE_FEATURES = V8_FEATURES + NEW_PRICE_FEATURES + NEW_XS_FEATURES
 ALL_FEATURES = BASE_FEATURES
 
 
@@ -24,6 +30,10 @@ def add_cross_sectional(data: "pd.DataFrame") -> "pd.DataFrame":
         data[f"xr_{c}"] = g[c].rank(pct=True)
     data["sector_ret_20"] = data.groupby(["date", "sector"]).ret_20.transform("mean")
     data["sector_rank"] = data.groupby("date").sector_ret_20.rank(pct=True)
+    data["rel_sector_20"] = data.ret_20 - data.sector_ret_20
+    for c, src in (("xr_mom_12_1", "mom_12_1"), ("xr_sharpe_60", "sharpe_60"), ("xr_liquidity", "traded_value_20")):
+        if src in data:
+            data[c] = g[src].rank(pct=True)
     return data
 
 
@@ -87,6 +97,17 @@ def compute(df: pd.DataFrame, bench: pd.DataFrame | None = None) -> pd.DataFrame
     f["up_days_10"] = (c.diff() > 0).rolling(10).sum()
     f["traded_value_20"] = (c * f.volume).rolling(20).mean()
     f["low_20"] = f.low.rolling(20).min()
+    r = c.pct_change()
+    f["ret_120"] = c.pct_change(120)
+    f["mom_12_1"] = c.shift(21) / c.shift(252) - 1  # 12-month momentum, skipping the last month
+    f["vol_ratio"] = r.rolling(20).std() / r.rolling(120).std()  # < 1: volatility is contracting
+    pos = pd.Series(np.arange(len(c)), index=c.index, dtype=float)
+    at_high = c >= c.rolling(252, min_periods=120).max()
+    f["days_since_high"] = (pos - pos.where(at_high).ffill()) / 252
+    rng = (f.high - f.low).replace(0, np.nan)
+    f["clv_10"] = (((c - f.low) - (f.high - c)) / rng).rolling(10).mean()  # closes near the day's high
+    f["dd_60"] = c / c.rolling(60).max() - 1
+    f["sharpe_60"] = r.rolling(60).mean() / r.rolling(60).std()  # smooth trends rank above jumpy ones
     return f
 
 

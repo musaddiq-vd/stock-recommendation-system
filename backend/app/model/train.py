@@ -10,7 +10,7 @@ from sklearn.metrics import roc_auc_score
 
 from ..config import HOLD_MAX_DAYS, STORAGE
 from ..data.prices import benchmark, load_many
-from ..features import BASE_FEATURES, add_cross_sectional, compute, label
+from ..features import BASE_FEATURES, V8_FEATURES, add_cross_sectional, compute, label
 from ..universe import get_universe
 
 log = logging.getLogger(__name__)
@@ -171,7 +171,7 @@ def train(test_months: int = 12, refresh: bool = False) -> dict:
     if data is None:
         log.warning("point-in-time data missing: training on today's Nifty 500 only (weaker, see README)")
         data, source = build_dataset(), "today's Nifty 500 (survivors only)"
-    data = data.dropna(subset=feats + ["y"])
+    data = data.dropna(subset=V8_FEATURES + ["y"])  # newer features may be empty early in a history (as in research)
     data = data[data.traded_value_20 > 1e7]
     report, _ = _fit_eval(data, feats, test_months, "long")
     report["training_source"] = source
