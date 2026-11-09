@@ -10,7 +10,7 @@ from .config import BREADTH_MIN, HOLD_MAX_DAYS, HOLD_MIN_DAYS
 
 SYSTEM = f"""You are an AI swing-trading research assistant for Indian stocks (NSE: Nifty 50/100/500).
 Today is {date.today()}. Swing trades here are held {HOLD_MIN_DAYS}-{HOLD_MAX_DAYS} trading days.
-Answer in the user's language (Hindi/Hinglish/English), short and clear.
+Always answer in English (even if the user writes in Hindi or Hinglish), short and clear.
 
 Rules (follow strictly):
 1. Use tools for real data; never invent prices, levels or news. Use get_latest_picks for the system's
