@@ -15,13 +15,32 @@ researches each one with LLM agents, and tracks every call against real market d
 [![CI](https://github.com/musaddiq-vd/stock-recommendation-system/actions/workflows/ci.yml/badge.svg)](https://github.com/musaddiq-vd/stock-recommendation-system/actions/workflows/ci.yml)
 ![Status](https://img.shields.io/badge/status-research%20project-blueviolet)
 
-[Features](#-features) · [How it works](#-how-it-works) · [Results](#-backtest-results) · [Quick start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [API](#-api-reference) · [Security](#-security-and-privacy) · [Limitations](#%EF%B8%8F-limitations)
+[Screenshots](#-screenshots) · [Features](#-features) · [How it works](#-how-it-works) · [Results](#-backtest-results) · [Quick start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [API](#-api-reference) · [Security](#-security-and-privacy) · [Limitations](#%EF%B8%8F-limitations)
+
+<br/>
+
+<img src="docs/screenshots/dashboard.png" alt="Dashboard with the latest scan, market gate status and pick cards" width="100%"/>
 
 </div>
 
 > [!WARNING]
 > This project is for **education and research only**. It is not investment advice, and nothing here is a
 > recommendation to buy or sell any security. Markets carry risk; past backtest results do not guarantee future returns.
+
+---
+
+## 📸 Screenshots
+
+| | |
+|---|---|
+| **Stock detail:** chart with entry / target / stop, risk-based size, rubric and the three Buy checks | **Research chat:** reads the latest scan, says when there is no Buy call and why |
+| <img src="docs/screenshots/stock-detail.png" alt="Stock detail drawer"/> | <img src="docs/screenshots/chat.png" alt="Research chat answer"/> |
+| **Sector heatmap:** tiles sized by turnover; click a sector to see its stocks | **Rotation map:** which sectors are leading, weakening, lagging or improving vs the market |
+| <img src="docs/screenshots/heatmap-tiles.png" alt="Sector heatmap tiles"/> | <img src="docs/screenshots/rotation-map.png" alt="Sector rotation map"/> |
+| **Backtest:** live track record and the 22-year survivorship-free walk-forward | **Mobile:** the same dashboard on a phone, chat behind a button |
+| <img src="docs/screenshots/backtest.png" alt="Backtest tab"/> | <img src="docs/screenshots/mobile.png" alt="Mobile view" width="60%"/> |
+
+<sub>Screenshots from a local run on 9 Nov 2026, when the market gate was closed (no Buy calls that day). Market data only; not advice.</sub>
 
 ---
 
@@ -377,6 +396,7 @@ frontend/
 docker-compose.yml       API + dashboard for a server
 docker-compose.local.yml Overrides to run on your own computer
 .github/workflows/ci.yml Lint, tests, type check and Docker builds
+docs/screenshots/        Images used in this README
 ```
 
 ---
