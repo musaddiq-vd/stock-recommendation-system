@@ -31,7 +31,7 @@ type Msg = { role: "user" | "assistant"; content: string; tools?: string[] };
 const SUGGESTIONS = [
   "What are today's top 3 swing picks?",
   "Any good swing trade in the banking sector?",
-  "What is the 15-20 day outlook for TATAMOTORS?",
+  "What is the 15-20 day outlook for RELIANCE?",
 ];
 
 export default function ChatPanel() {
