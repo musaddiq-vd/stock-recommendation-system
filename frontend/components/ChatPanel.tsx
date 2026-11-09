@@ -24,7 +24,7 @@ const MD: Components = {
   a: ({ children, href }) => <a href={href} target="_blank" className="text-sky-400 hover:underline">{children}</a>,
   blockquote: ({ children }) => <blockquote className="my-1.5 border-l-2 border-amber-600 pl-2 text-zinc-400">{children}</blockquote>,
 };
-import { API } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 type Msg = { role: "user" | "assistant"; content: string; tools?: string[] };
 
@@ -50,12 +50,13 @@ export default function ChatPanel() {
     setInput("");
     setBusy(true);
     try {
-      const r = await fetch(`${API}/api/chat`, {
+      const r = await apiFetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ messages: history.map(({ role, content }) => ({ role, content })) }),
       });
-      const reader = r.body!.getReader();
+      if (!r.ok || !r.body) throw new Error(r.status === 401 ? "Please sign in again." : `Chat failed (${r.status})`);
+      const reader = r.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
       while (true) {
@@ -79,7 +80,7 @@ export default function ChatPanel() {
         }
       }
     } catch (e) {
-      setMsgs((m) => [...m.slice(0, -1), { role: "assistant", content: `Error: ${e}` }]);
+      setMsgs((m) => [...m.slice(0, -1), { role: "assistant", content: `⚠️ ${e instanceof Error ? e.message : e}` }]);
     } finally {
       setBusy(false);
     }

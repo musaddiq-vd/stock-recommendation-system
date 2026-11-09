@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { API, get } from "@/lib/api";
+import { del, get, post } from "@/lib/api";
 import { inr } from "@/lib/sizing";
 
 interface Trade {
@@ -34,7 +34,8 @@ export default function PaperPanel({ refreshKey }: { refreshKey: number }) {
   }, [load, refreshKey]);
 
   async function act(id: number, how: "close" | "delete") {
-    await fetch(`${API}/api/paper/${id}${how === "close" ? "/close" : ""}`, { method: how === "close" ? "POST" : "DELETE" });
+    if (how === "delete" && !window.confirm("Delete this paper trade permanently?")) return;
+    await (how === "close" ? post(`/api/paper/${id}/close`, {}) : del(`/api/paper/${id}`));
     load();
   }
 

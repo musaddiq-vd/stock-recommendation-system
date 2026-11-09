@@ -66,21 +66,66 @@ export interface Scan {
   picks: Pick[];
 }
 
-export async function get<T>(path: string): Promise<T> {
-  const r = await fetch(`${API}${path}`, { cache: "no-store" });
-  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+// ---------- session ----------
+const TOKEN_KEY = "swing.token";
+export const AUTH_EVENT = "swing:auth-required";
+
+export function getToken(): string {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+export function setToken(token: string) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* storage unavailable (private mode): the session lasts until reload */
+  }
+}
+
+/** fetch() against the API with the session token; a 401 clears it and asks the page to show the login. */
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const r = await fetch(`${API}${path}`, { cache: "no-store", ...init, headers });
+  if (r.status === 401 && !path.startsWith("/api/auth/")) {
+    setToken("");
+    window.dispatchEvent(new Event(AUTH_EVENT));
+  }
+  return r;
+}
+
+/** Readable error text from a FastAPI error body ({"detail": "..."} or validation errors). */
+async function errorText(r: Response): Promise<string> {
+  try {
+    const j = await r.json();
+    if (typeof j.detail === "string") return j.detail;
+    if (Array.isArray(j.detail)) return j.detail.map((d: { msg?: string }) => d.msg).join("; ");
+  } catch {
+    /* not JSON */
+  }
+  return `Request failed (${r.status})`;
+}
+
+async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
+  const r = await apiFetch(path, {
+    method,
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await errorText(r));
   return r.json();
 }
 
-export async function post<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(`${API}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-  return r.json();
-}
+export const get = <T,>(path: string) => send<T>(path, "GET");
+export const post = <T,>(path: string, body: unknown) => send<T>(path, "POST", body);
+export const put = <T,>(path: string, body: unknown) => send<T>(path, "PUT", body);
+export const del = <T,>(path: string) => send<T>(path, "DELETE");
 
 export const TIER_STYLE: Record<Tier, { card: string; badge: string; label: string }> = {
   strong: {

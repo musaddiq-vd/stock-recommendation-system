@@ -7,13 +7,32 @@ import SectorHeatmap from "@/components/SectorHeatmap";
 import PickCard from "@/components/PickCard";
 import SettingsPanel from "@/components/SettingsPanel";
 import StockDrawer from "@/components/StockDrawer";
-import { get, Market, Pick, post, Scan, Tier } from "@/lib/api";
+import Login from "@/components/Login";
+import { AUTH_EVENT, get, getToken, Market, Pick, post, Scan, setToken, Tier } from "@/lib/api";
 import { Settings } from "@/lib/sizing";
 
 const UNIVERSES = ["NIFTY50", "NIFTY100", "NIFTY500"];
 type ModelReport = { auc: number; test_from: string; test_to: string; backtest: { base_win_rate: number; by_threshold: { threshold: number; trades: number; win_rate: number; avg_ret: number; avg_days: number }[] } };
 
+/** Shows the login screen when the API asks for one, otherwise the dashboard. */
 export default function Home() {
+  const [state, setState] = useState<"checking" | "login" | "ok">("checking");
+
+  useEffect(() => {
+    get<{ auth_required: boolean }>("/api/auth/status")
+      .then((s) => setState(s.auth_required && !getToken() ? "login" : "ok"))
+      .catch(() => setState("ok")); // API down: the dashboard shows its own errors
+    const onAuth = () => setState("login");
+    window.addEventListener(AUTH_EVENT, onAuth);
+    return () => window.removeEventListener(AUTH_EVENT, onAuth);
+  }, []);
+
+  if (state === "checking") return <div className="min-h-screen flex items-center justify-center text-sm text-zinc-500">Loading…</div>;
+  if (state === "login") return <Login onDone={() => setState("ok")} />;
+  return <Dashboard />;
+}
+
+function Dashboard() {
   const [universe, setUniverse] = useState("NIFTY100");
   const [sector, setSector] = useState("");
   const [mode, setMode] = useState<"news" | "technical">("news");
@@ -39,15 +58,36 @@ export default function Home() {
     get<ModelReport>("/api/model").then(setReport).catch(() => {});
     get<ModelReport>("/api/model?side=short").then(setShortReport).catch(() => {});
     get<Settings>("/api/settings").then(setSettings).catch(() => {});
-    get<Scan>("/api/scans/latest").then((s) => s?.id && setScan(s)).catch(() => {});
   }, []);
 
-  const poll = useCallback(async (id: number) => {
-    const s = await get<Scan>(`/api/scans/${id}`);
-    setScan(s);
-    if (s.status === "running") setTimeout(() => poll(id), 2500);
-    else setScanId(null);
+  // Polls a running scan; network blips are retried with backoff instead of leaving the button stuck.
+  const poll = useCallback(async (id: number, failures = 0) => {
+    try {
+      const s = await get<Scan>(`/api/scans/${id}`);
+      setScan(s);
+      if (s.status === "running") setTimeout(() => poll(id), 2500);
+      else setScanId(null);
+    } catch (e) {
+      if (failures >= 8) {
+        setErr(`Lost track of scan #${id}: ${e instanceof Error ? e.message : e}`);
+        setScanId(null);
+      } else setTimeout(() => poll(id, failures + 1), Math.min(30000, 2500 * 2 ** failures));
+    }
   }, []);
+
+  useEffect(() => {
+    // pick up a scan that is still running (e.g. the scheduled daily scan) so the page shows its progress
+    get<Scan>("/api/scans/latest?include_running=true")
+      .then((s) => {
+        if (!s?.id) return;
+        if (s.status === "running") {
+          setScanId(s.id);
+          poll(s.id);
+        } else if (s.status === "done") setScan(s);
+        else get<Scan>("/api/scans/latest").then((d) => d?.id && setScan(d)).catch(() => {});
+      })
+      .catch(() => {});
+  }, [poll]);
 
   async function runScan() {
     setErr("");
@@ -56,7 +96,7 @@ export default function Home() {
       setScanId(scan_id);
       poll(scan_id);
     } catch (e) {
-      setErr(String(e));
+      setErr(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -99,6 +139,17 @@ export default function Home() {
               <button onClick={() => setShowSettings(true)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-900">
                 ⚙ Settings{settings?.telegram_configured ? " · 🔔" : ""}
               </button>
+              {getToken() && (
+                <button
+                  onClick={() => {
+                    setToken("");
+                    window.dispatchEvent(new Event(AUTH_EVENT));
+                  }}
+                  className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:bg-zinc-900"
+                >
+                  Sign out
+                </button>
+              )}
             </div>
           </div>
 

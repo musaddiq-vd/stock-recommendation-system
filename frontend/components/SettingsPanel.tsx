@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { API, post } from "@/lib/api";
+import { post, put } from "@/lib/api";
 import { Settings } from "@/lib/sizing";
 
 export default function SettingsPanel({ s, onSaved, onClose }: { s: Settings; onSaved: (s: Settings) => void; onClose: () => void }) {
@@ -17,8 +17,13 @@ export default function SettingsPanel({ s, onSaved, onClose }: { s: Settings; on
     const body: Record<string, unknown> = { capital: +capital, risk_pct: +risk, margin_pct: +margin, alerts_enabled: alertsOn };
     if (token.trim()) body.telegram_bot_token = token.trim();
     if (chatId.trim()) body.telegram_chat_id = chatId.trim();
-    const r = await fetch(`${API}/api/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    const ns = (await r.json()) as Settings;
+    let ns: Settings;
+    try {
+      ns = await put<Settings>("/api/settings", body);
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : String(e));
+      return;
+    }
     setChatId(ns.telegram_chat_id);
     setToken("");
     onSaved(ns);

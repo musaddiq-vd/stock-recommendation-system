@@ -23,15 +23,15 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
     try {
       const lot = pick.lot_size || 1;
       const q = pick.side === "short" ? Math.max(lot, Math.round(qty / lot) * lot) : Math.max(1, Math.floor(qty));
-      await post("/api/paper", {
+      // the server opens at the current price, so a trade taken days after the scan stays honest
+      const t = await post<{ entry: number; opened_on: string }>("/api/paper", {
         symbol: pick.symbol, side: pick.side || "long", qty: q, lots: pick.side === "short" ? q / lot : null,
-        entry: pick.levels.entry, target: pick.levels.target, stop_loss: pick.levels.stop_loss,
-        opened_on: pick.as_of, scan_id: scanId,
+        target: pick.levels.target, stop_loss: pick.levels.stop_loss, scan_id: scanId,
       });
-      setPaperMsg(`Paper trade open: ${q} shares ✓`);
+      setPaperMsg(`Paper trade open: ${q} shares at ₹${t.entry} (${t.opened_on}) ✓`);
       onPaper();
     } catch (e) {
-      setPaperMsg(String(e));
+      setPaperMsg(`⚠️ ${e instanceof Error ? e.message : e}`);
     }
   }
 
