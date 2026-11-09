@@ -11,6 +11,8 @@ researches each one with LLM agents, and tracks every call against real market d
 ![Next.js](https://img.shields.io/badge/Next.js-15-000000?logo=nextdotjs&logoColor=white)
 ![Tailwind](https://img.shields.io/badge/Tailwind-v4-06B6D4?logo=tailwindcss&logoColor=white)
 ![AWS Bedrock](https://img.shields.io/badge/AWS-Bedrock-FF9900?logo=amazonaws&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
+[![CI](https://github.com/musaddiq-vd/stock-recommendation-system/actions/workflows/ci.yml/badge.svg)](https://github.com/musaddiq-vd/stock-recommendation-system/actions/workflows/ci.yml)
 ![Status](https://img.shields.io/badge/status-research%20project-blueviolet)
 
 [Features](#-features) · [How it works](#-how-it-works) · [Results](#-backtest-results) · [Quick start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [API](#-api-reference) · [Limitations](#-limitations)
@@ -212,7 +214,7 @@ The research chat sits on the right (a floating button on mobile). Settings hold
 cd backend
 python -m venv .venv
 # Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt  # runtime + test/lint tools
 cp .env.example .env                 # then edit if needed
 
 python -m app.data.nse 4             # one-time: 4 years of NSE delivery / F&O history (~30 min)
@@ -235,10 +237,18 @@ Agent progress streams live; a 20-stock scan takes about 5–8 minutes.
 
 ## ⚙️ Configuration
 
-All settings live in `backend/.env` (see `.env.example`). AWS credentials are read from the standard AWS config, never from this repo.
+All settings live in `backend/.env` (see `.env.example`). AWS credentials come from the standard AWS config or
+environment variables, never from this repo.
 
 | Variable | Default | Description |
 |---|---|---|
+| `APP_PASSWORD` | *(empty)* | Dashboard password. **Required in production**; empty disables login (local development only) |
+| `APP_SECRET` | *(random)* | Signs login tokens. Set a long random value so sessions survive restarts |
+| `TOKEN_TTL_HOURS` | `168` | How long a login stays valid |
+| `ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated dashboard URLs allowed to call the API (CORS) |
+| `RUN_SCHEDULER` | `1` | Run the scheduled jobs in this API process; keep exactly one such process |
+| `STORAGE_DIR` | `backend/storage` | Where prices, models and the SQLite database live |
+| `LOG_LEVEL` | `INFO` | Python logging level |
 | `AWS_REGION` | `us-east-1` | Bedrock region |
 | `BEDROCK_MODEL_ID` | `moonshotai.kimi-k2.5` | Any Bedrock model that supports the Converse API with tool use |
 | `HOLD_MIN_DAYS` / `HOLD_MAX_DAYS` | `15` / `20` | Swing holding window |
@@ -297,7 +307,8 @@ Interactive docs are available at `http://localhost:8000/docs`.
 ```
 backend/
   app/
-    main.py              FastAPI routes + scheduler jobs
+    main.py              FastAPI routes, login middleware, scheduler jobs
+    auth.py              Password login, signed tokens, rate limit
     config.py            Environment settings
     universe.py          Nifty 50/100/500 lists, sector tags, F&O lot sizes
     features.py          Indicators, NSE features, triple-barrier labels
@@ -342,6 +353,29 @@ Yahoo data is ~15 minutes delayed intraday. When Yahoo misses the latest daily b
 
 ## ☁️ Deployment
 
+### Docker (recommended)
+```bash
+cp backend/.env.example backend/.env
+# set APP_PASSWORD, APP_SECRET and AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or use an instance role)
+docker compose up -d --build
+```
+- `api` on port 8000: FastAPI + scheduler, data in the `swing-data` volume, health check on `/api/health`.
+- `web` on port 3000: the Next.js dashboard as a standalone Node server.
+- For a public domain, set `PUBLIC_API_URL` (baked into the dashboard at build time) and `PUBLIC_WEB_URL`
+  (allowed CORS origin) before `docker compose build`, and put both behind HTTPS (Caddy, Nginx or Cloudflare).
+- After the first start, train the models once inside the container:
+  `docker compose exec api python -m app.model.train`
+
+### Production checklist
+- [x] Password login with signed, expiring tokens and a rate limit on failed attempts
+- [x] CORS limited to your dashboard URL; errors never return stack traces
+- [x] Input validation on every endpoint (symbols, scans, chat, settings, paper trades)
+- [x] One scan at a time; scans interrupted by a restart are closed automatically
+- [x] Non-root containers, health checks, pinned Python dependencies, CI on every push
+- [ ] Serve over HTTPS and keep `APP_PASSWORD` / `APP_SECRET` / AWS keys only in the server's `.env`
+- [ ] Back up the `swing-data` volume (SQLite database, models and paper trades)
+
+### Hosting options
 The backend needs to run continuously for scans, alerts and retraining. Free options:
 
 | Option | Notes |
@@ -350,16 +384,19 @@ The backend needs to run continuously for scans, alerts and retraining. Free opt
 | Home machine + **Cloudflare Tunnel** | Free, NSE-friendly residential IP; the machine must stay on |
 | **Vercel** | Free hosting for the Next.js frontend |
 
-Bedrock usage is billed by AWS in every option. Add authentication before exposing the dashboard publicly.
+Bedrock usage is billed by AWS in every option. Always set `APP_PASSWORD` before exposing the dashboard.
 
 ---
 
 ## 🧪 Testing
 
 ```bash
-cd backend && pytest
+cd backend && ruff check app tests && pytest     # lint + 18 tests
+cd frontend && npm run lint && npx tsc --noEmit  # lint + type check
 ```
-Tests cover the absence of look-ahead in technical and NSE features, the triple-barrier labels and the paper-trade barrier logic.
+Tests cover the absence of look-ahead in technical and NSE features, the vectorised triple-barrier labels, paper-trade
+logic (including opening at the current price), login and token expiry, rate limiting, input validation, the one-scan
+lock, recovery after restart and the tier rules. GitHub Actions runs all of it plus both Docker builds on every push.
 
 ---
 
@@ -375,7 +412,7 @@ Tests cover the absence of look-ahead in technical and NSE features, the triple-
 
 ## 🛣️ Roadmap
 
-- [ ] Login and one-click cloud deployment (Docker)
+- [x] Login, Docker deployment and CI
 - [ ] Calibrate agent thresholds from live outcomes
 - [ ] Broker API integration for real-time prices
 - [ ] Walk-forward retraining report in the dashboard
