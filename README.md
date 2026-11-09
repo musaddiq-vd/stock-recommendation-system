@@ -15,7 +15,7 @@ researches each one with LLM agents, and tracks every call against real market d
 [![CI](https://github.com/musaddiq-vd/stock-recommendation-system/actions/workflows/ci.yml/badge.svg)](https://github.com/musaddiq-vd/stock-recommendation-system/actions/workflows/ci.yml)
 ![Status](https://img.shields.io/badge/status-research%20project-blueviolet)
 
-[Features](#-features) · [How it works](#-how-it-works) · [Results](#-backtest-results) · [Quick start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [API](#-api-reference) · [Limitations](#-limitations)
+[Features](#-features) · [How it works](#-how-it-works) · [Results](#-backtest-results) · [Quick start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [API](#-api-reference) · [Security](#-security-and-privacy) · [Limitations](#%EF%B8%8F-limitations)
 
 </div>
 
@@ -32,15 +32,15 @@ researches each one with LLM agents, and tracks every call against real market d
 | 🧮 | **ML screener** | A LightGBM model ranks ~480 liquid NSE stocks every day by the probability that a long swing trade hits its target before its stop within 20 sessions. |
 | 🌡️ | **Market gate** | Buy calls only when Nifty and more than half of the market's stocks are above their 200-day averages; this cut the worst drawdown from −66% to −23% in the honest backtest. |
 | 🤖 | **Research agent** | For the top candidates, an LLM agent (AWS Bedrock) reads news, filings, fundamentals and official NSE event dates, and can veto a pick for red flags, negative news or results inside the holding window. |
-| 🟢 | **Confidence tiers** | Final score = ML rank + a rule-based rubric, both validated on 22 years of walk-forward data. Green requires every gate: market regime, rubric and an AI agent veto check. |
+| 🟢 | **One honest Buy tier** | A stock is a green **Buy** only when all three checks pass: top 2% of the daily ML ranking, market gate open, research agent clear. Everything else is **Watch** or **Avoid**, never a buy. |
 | 🧭 | **Market context** | Nifty regime (bullish / neutral / bearish), FII/DII net flows and a sector **money-flow heatmap**. |
-| 📐 | **Position sizing** | Risk-based sizing from your capital and risk-per-trade: shares or lots, capital used, max loss and target profit for every pick. |
+| 📐 | **Position sizing** | Risk-based sizing for Buy calls: lose at most your risk % of capital if the stop hits, never invest more than your capital. Shows shares, capital used, max loss and target profit. |
 | 📝 | **Paper trading** | Open virtual trades from any pick. They auto-close at target, stop or the 20-day timeout, with live P&L. |
-| 🔔 | **Telegram alerts** | New high-probability picks, target/stop hits on recommendations, and paper-trade exits. |
+| 🔔 | **Telegram alerts** | New Buy calls, target/stop hits, paper-trade exits, a weekly summary, and warnings when a scan fails or data goes stale. |
 | 🔬 | **22-year research** | Walk-forward test from 2004 to 2026 on 30 years of data: 20 target/stop settings, regime and rubric filters, a random baseline and an anonymised LLM test. |
 | 📈 | **Live track record** | Real outcomes of the app's own past picks (target, stop or 20-day exit), per tier. |
 | 📊 | **Backtest dashboard** | Out-of-sample equity curve vs Nifty, drawdown chart, monthly returns and a feature-set comparison. |
-| 💬 | **Research chat** | Ask about any stock or sector; the chat agent uses the same live tools and the latest scan. |
+| 💬 | **Research chat** | Ask about any stock or sector. The chat uses the same live tools and the latest scan, only calls Buy-tier picks a buy, sizes positions by your risk setting and never invents price levels. |
 | ⏰ | **Automation** | Daily scan after market close, intraday target/stop checks every 15 minutes, monthly model retraining. |
 
 ---
@@ -51,33 +51,33 @@ researches each one with LLM agents, and tracks every call against real market d
 flowchart LR
     subgraph Data["📥 Data layer"]
         Y[Yahoo Finance<br/>daily OHLCV]
-        N[NSE archives<br/>official OHLC · delivery %]
+        N[NSE bhavcopies<br/>point-in-time universe since 2002]
         E[NSE event calendar<br/>results · dividends]
         F[NSE FII/DII flows]
         W[News RSS + web search]
     end
 
     subgraph Quant["🧮 Quant layer"]
-        FE[Feature engineering<br/>29 features incl. cross-sectional ranks]
-        ML[LightGBM<br/>long model]
-        RU[Rule-based rubric<br/>validated 22 years]
+        FE[Feature engineering<br/>technicals + cross-sectional ranks]
+        ML[LightGBM<br/>daily top 2%]
+        MG[Market gate<br/>Nifty + breadth above 200-day]
     end
 
     subgraph Agents["🤖 Agent layer · AWS Bedrock"]
         RA[Research agent<br/>tool calling]
-        RB[Veto: red flags, news,<br/>results in window]
+        RB[Veto only: red flags,<br/>negative news, results in window]
     end
 
     subgraph App["🖥️ App"]
         API[FastAPI + scheduler]
-        UI[Next.js dashboard<br/>picks · sectors · backtest · paper]
+        UI[Next.js dashboard + chat<br/>picks · sectors · backtest · paper]
         TG[Telegram alerts]
     end
 
     Y --> FE
     N --> FE
     FE --> ML --> RA
-    FE --> RU --> RB
+    FE --> MG --> API
     E --> RA
     F --> RA
     W --> RA
@@ -212,7 +212,7 @@ reference.
 
 | Tab | What you see |
 |---|---|
-| **AI Picks** | Buy ideas as cards, colored by tier, with the 22-year stats of that tier, entry / target / stop, position size, gates and official event badges. Click a card for the candlestick chart, rubric breakdown, gates, the agent's news findings, fundamentals, sources and the full research trail. |
+| **AI Picks** | Scanned stocks as cards (filter All / Buy / Watch / Avoid) with entry / target / stop, the three checks and official event badges; Buy cards also show the 22-year stats and position size. A line on top says whether the market gate is open. Click a card for the candlestick chart, rubric breakdown, gates, the agent's news findings, fundamentals, sources and the full research trail. |
 | **Sector Heatmap** | Money flow (20D / 5D), 1D–3M returns, relative strength, breadth, turnover and delivery surge per sector. |
 | **Backtest** | Live track record of past picks, the 22-year walk-forward (equity, yearly returns, per-tier stats) and the latest model's 12-month test. |
 | **Paper Portfolio** | Virtual equity, realized / unrealized P&L, win rate and every open or closed trade. |
@@ -303,18 +303,23 @@ The backend must stay running for these jobs (see [Deployment](#-deployment)).
 
 | Method | Endpoint | Description |
 |---|---|---|
+| `GET` | `/api/health` | Health check (public) |
+| `GET` `POST` | `/api/auth/status` · `/api/auth/login` | Whether login is required; exchange the password for a token |
+| `GET` | `/api/universe` | Stocks and sectors in Nifty 50/100/500 |
 | `POST` | `/api/scan` | Start a scan: `{universe, sector, top_n}` (409 while another scan runs) |
-| `GET` | `/api/scans/{id}` · `/api/scans/latest` | Scan status, live progress log and picks |
+| `GET` | `/api/scans` · `/api/scans/{id}` · `/api/scans/latest` | Scan history, status, live progress log and picks |
 | `GET` | `/api/stock/{symbol}` | Candles, technicals and fundamentals |
-| `GET` | `/api/market` | Nifty regime and FII/DII flows |
+| `GET` | `/api/market` · `/api/flows` | Nifty regime and FII/DII flows |
 | `GET` | `/api/sectors?index=NIFTY500` | Sector heatmap data |
-| `GET` | `/api/backtest` | Portfolio backtest, monthly returns, feature comparison |
+| `GET` | `/api/backtest` · `/api/research` | Latest model's 12-month test and the 22-year walk-forward results |
 | `GET` | `/api/model` | Model report |
 | `GET` `POST` `DELETE` | `/api/paper` · `/api/paper/{id}/close` · `/api/paper/{id}` | Paper trading |
 | `GET` `PUT` | `/api/settings` | Capital, risk, alerts (bot token is never returned) |
 | `POST` | `/api/alerts/test` | Send a Telegram test message |
 | `POST` | `/api/chat` | Research chat (server-sent events) |
-| `GET` | `/api/performance` | Live track record of past recommendations by tier |
+| `GET` | `/api/performance` | Live track record of past recommendations by tier, plus the agent veto check |
+
+Every endpoint except `/api/health` and `/api/auth/*` needs the login token when `APP_PASSWORD` is set.
 
 Interactive docs are available at `http://localhost:8000/docs`.
 
@@ -344,13 +349,23 @@ backend/
     agents/
       llm.py             Bedrock Converse tool-calling loop
       tools.py           Agent tools (technicals, fundamentals, events, news, web)
-      research_agent.py  Rubric-based research agent
-      orchestrator.py    Scan pipeline, scoring, outcome tracking
-  tests/                 Look-ahead, label and paper-trading tests
+      research_agent.py  Veto-only research agent (news, filings, event dates)
+      orchestrator.py    Scan pipeline, checks and tiers, outcome tracking
+    research/            22-year research pipeline (not used at runtime)
+      pit.py             NSE bhavcopies -> split-adjusted prices + point-in-time universe
+      v2.py              Features, realistic outcomes, walk-forward, reports
+      experiment.py      Portfolio simulator
+      exits.py           Sector caps, breakeven and trailing-stop tests
+      training_data.py   Survivor vs point-in-time training comparison
+      llm_backtest.py    Anonymised LLM chart-reading test
+  tests/                 API, chat, labels, look-ahead and paper-trading tests
 frontend/
   app/page.tsx           Dashboard
   components/            Pick cards, stock drawer, heatmap, backtest, paper, chat, settings
   lib/                   API client and position sizing
+docker-compose.yml       API + dashboard for a server
+docker-compose.local.yml Overrides to run on your own computer
+.github/workflows/ci.yml Lint, tests, type check and Docker builds
 ```
 
 ---
@@ -424,16 +439,27 @@ cd frontend && npm run lint && npx tsc --noEmit  # lint + type check
 ```
 Tests cover the absence of look-ahead in the features, the vectorised triple-barrier labels, pick outcome tracking, paper-trade
 logic (including opening at the current price), login and token expiry, rate limiting, input validation, the one-scan
-lock, recovery after restart and the tier rules. GitHub Actions runs all of it plus both Docker builds on every push.
+lock, recovery after restart, the tier rules, and the chat's buy/watch split and risk sizing. GitHub Actions runs all of it plus both Docker builds on every push.
+
+---
+
+## 🔒 Security and privacy
+
+- No keys, passwords, tokens or personal data are stored in this repository. Secrets live only in `backend/.env`
+  (git-ignored); `backend/.env.example` lists the variable names with empty values.
+- The local database, models, price data and logs (`backend/storage/`, `*.db`, `*.parquet`, `*.joblib`, `*.log`)
+  are git-ignored, so the Telegram token and your paper trades never leave your machine.
+- The API never returns the Telegram bot token (only a short hint) and never returns stack traces.
+- AWS credentials come from your AWS profile, environment variables or an instance role.
 
 ---
 
 ## ⚠️ Limitations
 
-- The statistical edge is modest; expect many losing trades even when the system works as designed.
 - The agent layer is evaluated only going forward (outcome tracking + paper trading), not in the historical backtest.
 - Free data feeds can lag, change format or rate-limit. NSE may block cloud/datacenter IPs.
-- The edge is modest and uneven: some years lose money, and the last held-out year was flat for the model on its own.
+- The edge is modest and uneven: expect about half of the trades to lose, some years lose money, and the last
+  held-out year was flat for the model on its own.
 - The agent veto is measured live (Backtest tab → Agent veto check); judge it only after 100+ closed trades.
 - The LLM's news and fundamentals judgement cannot be backtested (no as-of-date news archive); only its chart reading was
   tested, and it showed no edge. Treat the agent as a risk filter, not a source of alpha.
