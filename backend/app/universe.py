@@ -87,7 +87,7 @@ def get_fo_lots() -> dict[str, int]:
     df.columns = [c.strip() for c in df.columns]
     lot_col = df.columns[2]
     out = {}
-    for sym, lot in zip(df.SYMBOL, df[lot_col]):
+    for sym, lot in zip(df.SYMBOL, df[lot_col], strict=False):
         try:
             out[str(sym).strip()] = int(float(str(lot).strip()))
         except (TypeError, ValueError):

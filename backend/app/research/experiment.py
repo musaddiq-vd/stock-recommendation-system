@@ -5,13 +5,11 @@ Usage:
     python -m app.research.experiment walk       # yearly walk-forward model scores (cached)
     python -m app.research.experiment grid       # compare barrier configs and filters
 """
-import json
 import logging
 import sys
 import time
 
 import lightgbm as lgb
-import numpy as np
 import pandas as pd
 
 from ..config import HOLD_MAX_DAYS, STORAGE
@@ -42,7 +40,7 @@ def build() -> pd.DataFrame:
     prices = load_all()
     bench = benchmark(prices)
     b200 = bench.close / bench.close.ewm(span=200, adjust=False).mean() - 1
-    sector = dict(zip(get_universe().symbol, get_universe().sector))
+    sector = dict(zip(get_universe().symbol, get_universe().sector, strict=False))
     frames = []
     for i, (s, df) in enumerate(prices.items(), 1):
         f = compute(df, bench)
@@ -116,7 +114,6 @@ def portfolio(sig: pd.DataFrame, rcol: str, dcol: str, slots: int = 10) -> dict:
     sig = (sig[["date", "symbol", "prob", rcol, dcol]].rename(columns={rcol: "ret_", dcol: "days_"})
            .sort_values(["date", "prob"], ascending=[True, False]))
     rcol, dcol = "ret_", "days_"
-    dates = np.array(sorted(sig.date.unique()))
     by_day = {d: g for d, g in sig.groupby("date")}
     all_days = pd.DatetimeIndex(sorted(set(sig.date)))  # signal days are trading days
     cash, open_pos, held, trades, curve = 1.0, [], set(), [], []

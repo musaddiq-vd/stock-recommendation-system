@@ -32,5 +32,5 @@ def test_vectorised_matches_loop():
         for ta, sa in ((3.5, 1.75), (1.5, 2.0), (2.0, 1.0)):
             fast = barrier_outcomes(*args, ta, sa, 20, side)
             slow = _slow(*args, ta, sa, 20, side)
-            for a, b in zip(fast, slow):
+            for a, b in zip(fast, slow, strict=False):
                 np.testing.assert_allclose(a, b, equal_nan=True)

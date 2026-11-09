@@ -45,7 +45,7 @@ def sector_heatmap(index: str = "NIFTY500") -> dict:
     uni = uni[uni.symbol.isin(members)]
     prices, bench = load_many(uni.symbol.tolist()), benchmark().close
     rows = []
-    for s, sector in zip(uni.symbol, uni.sector):
+    for s, sector in zip(uni.symbol, uni.sector, strict=False):
         df = prices.get(s)
         if df is None:
             continue

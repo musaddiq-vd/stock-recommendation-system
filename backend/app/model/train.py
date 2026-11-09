@@ -28,7 +28,7 @@ def model_path(side: str):
 def build_dataset(symbols: list[str] | None = None, side: str = "long") -> pd.DataFrame:
     uni = get_universe()
     symbols = symbols or uni.symbol.tolist()
-    sector = dict(zip(uni.symbol, uni.sector))
+    sector = dict(zip(uni.symbol, uni.sector, strict=False))
     prices, bench = load_many(symbols), benchmark()
     frames = []
     for s, df in prices.items():
@@ -93,7 +93,6 @@ def simulate_portfolio(te: pd.DataFrame, threshold: float, slots: int = 10, cost
     """Realistic-ish portfolio: max `slots` open trades, each 1/slots of equity at entry, best probability
     first, one position per stock, round-trip cost `cost`. Positions are carried at cost until they exit."""
     dates = np.array(sorted(te.date.unique()))
-    pos_of = {d: i for i, d in enumerate(dates)}
     sig = te[te.prob >= threshold].sort_values(["date", "prob"], ascending=[True, False])
     by_day = {d: g for d, g in sig.groupby("date")}
     cash, open_pos, held, curve, trades = 1.0, [], set(), [], []
@@ -167,7 +166,7 @@ def train(symbols: list[str] | None = None, test_months: int = 12, side: str = "
                                 "by_threshold": v["backtest"]["by_threshold"]} for k, v in results.items()}
     final = lgb.LGBMClassifier(**PARAMS)
     final.fit(data[feats], data.y)
-    report["feature_importance"] = sorted(zip(feats, final.feature_importances_.tolist()), key=lambda x: -x[1])
+    report["feature_importance"] = sorted(zip(feats, final.feature_importances_.tolist(), strict=False), key=lambda x: -x[1])
     joblib.dump({"model": final, "features": feats, "report": report}, model_path(side))
     name = "model_report.json" if side == "long" else f"model_report_{side}.json"
     (STORAGE / name).write_text(json.dumps(report, indent=2, default=str))
