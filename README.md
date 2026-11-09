@@ -15,7 +15,7 @@ researches each one with LLM agents, and tracks every call against real market d
 [![CI](https://github.com/musaddiq-vd/stock-recommendation-system/actions/workflows/ci.yml/badge.svg)](https://github.com/musaddiq-vd/stock-recommendation-system/actions/workflows/ci.yml)
 ![Status](https://img.shields.io/badge/status-research%20project-blueviolet)
 
-[Screenshots](#-screenshots) · [Features](#-features) · [How it works](#-how-it-works) · [Results](#-backtest-results) · [Quick start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [API](#-api-reference) · [Security](#-security-and-privacy) · [Limitations](#%EF%B8%8F-limitations)
+[Screenshots](#-screenshots) · [Features](#-features) · [How it works](#-how-it-works) · [Architecture](#%EF%B8%8F-architecture) · [Results](#-backtest-results) · [Quick start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [API](#-api-reference) · [Security](#-security-and-privacy) · [Limitations](#%EF%B8%8F-limitations)
 
 <br/>
 
@@ -162,6 +162,88 @@ so the same facts give the same verdict.
 
 Every Buy card shows these numbers, so the label never promises more than history delivered. The edge is real but modest:
 expect roughly half of the trades to lose, with winners slightly larger than losers on average.
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart TB
+    subgraph Client["Browser"]
+        UI["Next.js 15 dashboard<br/>picks · heatmap · backtest · paper · chat"]
+    end
+
+    subgraph API["FastAPI server"]
+        AUTH["Login middleware<br/>HMAC tokens · rate limit · CORS"]
+        ROUTES["REST + SSE routes"]
+        ORCH["Scan orchestrator<br/>one scan at a time"]
+        CHAT["Chat agent"]
+        SCHED["APScheduler<br/>daily · intraday · weekly · monthly"]
+        CACHE["In-memory caches<br/>heatmap · outcomes"]
+    end
+
+    subgraph Store["STORAGE_DIR volume"]
+        DB[("SQLite (WAL)<br/>scans · picks · settings · paper · alerts")]
+        PQ[("Parquet price cache<br/>Yahoo + NSE")]
+        MOD[("model.joblib<br/>+ model_report.json")]
+        RES[("research/<br/>22-year datasets & reports")]
+    end
+
+    subgraph Ext["External services"]
+        YF["Yahoo Finance"]
+        NSE["NSE archives & APIs"]
+        BR["AWS Bedrock LLM"]
+        WEB["Google News · DuckDuckGo"]
+        TG["Telegram Bot API"]
+    end
+
+    UI -->|HTTPS + token| AUTH --> ROUTES
+    ROUTES --> ORCH & CHAT & CACHE
+    SCHED --> ORCH
+    ORCH --> DB & PQ & MOD
+    ORCH -->|research agents| BR
+    CHAT --> BR
+    BR -. tool calls .-> WEB
+    YF & NSE -->|daily bars| PQ
+    SCHED -->|monthly retrain| RES --> MOD
+    ORCH & SCHED --> TG
+```
+
+### What happens in a scan
+1. **Market check:** Nifty vs its 200-day average, plus breadth (share of liquid stocks above their own 200-day average).
+2. **Score everything:** features for ~480 Nifty 500 stocks from the cached daily bars, then the LightGBM probability
+   and each stock's rank that day (`xs_pct`). Stale or suspended stocks are dropped.
+3. **Pick candidates:** the top N by ML rank inside the chosen index (and sector), liquid stocks only.
+4. **Research in parallel:** 4 agent threads call Bedrock with tools (technicals, fundamentals, news, web search,
+   NSE event calendar) and return strict JSON; official NSE event dates override the agent.
+5. **Judge:** three checks (ML top 2%, market gate, agent clear) give the tier: **Buy** only if all pass.
+6. **Save and notify:** picks are stored with the scoring version and entry/target/stop; Buy calls go to Telegram.
+   Progress streams to the dashboard while the scan runs; a failure is recorded and sent as an ops alert.
+
+After a scan, the intraday job checks open picks and paper trades every 15 minutes, and outcomes (target, stop,
+20-day exit, or "skipped" when the next open gaps past a level) feed the live track record.
+
+### Where data lives
+| Path in `STORAGE_DIR` | Contents | Rebuilt by |
+|---|---|---|
+| `app.db` | Scans, picks and outcomes, settings (incl. Telegram token), paper trades, sent alerts | The app |
+| `prices/` | Daily bars per symbol (parquet) | Every scan / daily job |
+| `nse/` | Bhavcopy delivery data, FII/DII flows | Daily job |
+| `universe/` | Nifty 50/100/500 lists (refreshed weekly) | On demand |
+| `model.joblib`, `model_report.json` | Live model, its feature list and holdout report | Monthly retrain |
+| `research/` | Point-in-time prices, datasets and walk-forward reports | Research commands |
+
+All of it is git-ignored; back up the volume to keep the history and paper trades.
+
+### Design decisions
+- **One API process runs the scheduler** (`RUN_SCHEDULER=1`); extra replicas set it to 0 so jobs never run twice.
+- **One scan at a time:** a lock returns `409` to a second request; scans cut off by a restart are closed on startup.
+- **Scoring versions:** every pick stores the rule set that made it, so the track record never mixes old and new rules.
+- **The model ships its feature list:** live scoring uses the columns saved with the model, so a retrain cannot
+  silently desync features.
+- **The LLM can only veto:** it never raises a score, because its chart reading showed no edge in a blind test.
+- **Point-in-time training:** the live model learns from stocks as they were each month, including later-delisted ones.
+- **Heatmaps are precomputed** at startup and after the evening data update, so the tab opens instantly.
 
 ---
 
