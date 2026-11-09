@@ -1,0 +1,29 @@
+# Production-style stack: API (FastAPI + scheduler) and dashboard (Next.js).
+#   cp backend/.env.example backend/.env   # set APP_PASSWORD, APP_SECRET and AWS keys
+#   docker compose up -d --build
+services:
+  api:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      STORAGE_DIR: /data
+      ALLOWED_ORIGINS: ${PUBLIC_WEB_URL:-http://localhost:3000}
+    volumes:
+      - swing-data:/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  swing-data:
