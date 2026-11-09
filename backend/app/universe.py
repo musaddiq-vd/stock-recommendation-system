@@ -41,7 +41,9 @@ def get_index(index: str) -> pd.DataFrame:
         except Exception:
             if not path.exists():
                 raise
-    return pd.read_csv(path)
+    df = pd.read_csv(path)
+    # NSE's lists sometimes hold placeholder rows (e.g. DUMMYHEG) for pending changes; they have no prices
+    return df[~df.symbol.astype(str).str.upper().str.startswith("DUMMY")].reset_index(drop=True)
 
 
 def get_universe() -> pd.DataFrame:
