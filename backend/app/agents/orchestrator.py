@@ -16,14 +16,18 @@ from ..config import (AGENT_TOP_N, HOLD_MAX_DAYS, HOLD_MIN_DAYS, MIN_AVG_TRADED_
                       SHORTS_ENABLED, STOP_ATR)
 from ..research.rubric_proxy import proxy_score
 from ..data.prices import benchmark, load_many
-from ..features import add_cross_sectional, add_nse, compute, trade_levels
+from ..features import add_cross_sectional, add_nse, compute
 from ..model.train import load_model, prob_percentile
 from ..universe import get_fo_lots, get_index, get_universe
 from .research_agent import research
 from .tools import get_technicals
 
 log = logging.getLogger(__name__)
-_lock = threading.Lock()
+_scan_lock = threading.Lock()  # one scan at a time: scans are long, hit Bedrock and share the price cache
+
+
+class ScanBusy(RuntimeError):
+    pass
 
 
 def market_regime() -> dict:
@@ -79,13 +83,16 @@ def hist_stats(prob: float, side: str = "long") -> dict:
     return best or {"win_rate": bt["base_win_rate"], "avg_ret": 0.0}
 
 
-def tier(score: float, verdict: str | None, gates_ok: bool = True) -> str:
-    """strong = high score + agent agrees + every historically validated gate passes."""
+def tier(score: float, verdict: str | None, gates: dict | None = None) -> str:
+    """strong: high score, agent clear and every historically validated gate passes.
+    good: agent clear and at least one of the two market gates (regime or rubric) passes."""
+    gates = gates or {}
     if verdict == "avoid":
         return "avoid"
-    if score >= 85 and verdict in ("buy", "short", None) and gates_ok:
+    go = verdict in ("buy", "short")
+    if score >= 85 and go and all(gates.values()):
         return "strong"
-    if score >= 72 and verdict in ("buy", "short", None):
+    if score >= 72 and go and (gates.get("regime", True) or gates.get("rubric", True)):
         return "good"
     return "watch"
 
@@ -93,10 +100,12 @@ def tier(score: float, verdict: str | None, gates_ok: bool = True) -> str:
 def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None, mode: str = "news",
              top_n: int = AGENT_TOP_N):
     progress = []
+    plock = threading.Lock()  # agents log from several threads
 
     def log_step(msg):
-        progress.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": msg})
-        db.update_scan(scan_id, progress=progress)
+        with plock:
+            progress.append({"t": datetime.now().strftime("%H:%M:%S"), "msg": msg})
+            db.update_scan(scan_id, progress=list(progress))
 
     try:
         log_step("Loading NSE price data and computing indicators")
@@ -173,7 +182,8 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
                 # Gates that lifted win rate and cut drawdown over 22 years of walk-forward tests
                 regime_ok = (not REGIME_FILTER) or (market["above_ema200"] if side == "long" else not market["above_ema200"])
                 news = (res.get("scores") or {}).get("news_catalyst", 7.5)
-                agent_ok = not res.get("red_flags") and news > 4 and res.get("event_in_window") is not True
+                agent_ok = (not res.get("parse_error") and not res.get("red_flags") and news > 4
+                            and res.get("event_in_window") is not True)
                 gates = {"regime": bool(regime_ok), "rubric": proxy >= RUBRIC_MIN, "agent": bool(agent_ok)}
                 verdict = "avoid" if res.get("red_flags") else ("buy" if side == "long" else "short") if agent_ok else "watch"
                 res["agent_verdict"], res["verdict"] = res.get("verdict"), verdict
@@ -182,7 +192,7 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
                     "lot_size": lots.get(r.symbol) if side == "short" else None, "official_event": official,
                     "as_of": str(pd.Timestamp(r.as_of).date()), "ml_prob": round(prob, 4),
                     "ml_percentile": ml_pct, "hist_win_rate": hs["win_rate"], "hist_avg_ret": hs["avg_ret"],
-                    "score": score, "tier": tier(score, verdict, all(gates.values())), "levels": snap["trade_levels"],
+                    "score": score, "tier": tier(score, verdict, gates), "levels": snap["trade_levels"],
                     "rubric_score": round(proxy, 1), "gates": gates,
                     "hold_days": f"{HOLD_MIN_DAYS}-{HOLD_MAX_DAYS}",
                     "technicals": {k: v for k, v in snap.items() if k not in ("last_30_closes", "trade_levels")},
@@ -204,12 +214,30 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
             log.exception("scan alert failed")
     except Exception as e:
         log.exception("scan failed")
-        db.update_scan(scan_id, status="error", error=str(e))
+        db.update_scan(scan_id, status="error", error=str(e)[:500])
+
+
+def scan_running() -> bool:
+    return _scan_lock.locked()
 
 
 def start_scan(universe="NIFTY100", sector=None, mode="news", top_n=AGENT_TOP_N) -> int:
-    scan_id = db.create_scan(universe, sector, mode)
-    threading.Thread(target=run_scan, args=(scan_id, universe, sector, mode, top_n), daemon=True).start()
+    """Start a scan in the background. Raises ScanBusy if another scan is still running."""
+    if not _scan_lock.acquire(blocking=False):
+        raise ScanBusy("A scan is already running")
+    try:
+        scan_id = db.create_scan(universe, sector, mode)
+    except Exception:
+        _scan_lock.release()
+        raise
+
+    def _run():
+        try:
+            run_scan(scan_id, universe, sector, mode, top_n)
+        finally:
+            _scan_lock.release()
+
+    threading.Thread(target=_run, daemon=True, name=f"scan-{scan_id}").start()
     return scan_id
 
 

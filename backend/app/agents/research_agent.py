@@ -136,9 +136,11 @@ def research(symbol: str, name: str, sector: str, snapshot: dict, ml_prob: float
             final = ev["text"]
     try:
         out = extract_json(final)
+        out["parse_error"] = False
     except Exception:
-        out = {"summary": final[:600], "bull_case": [], "bear_case": [], "news_sentiment": "unknown",
-               "event_risk": "unknown", "sources": [], "scores": {}}
+        out = {"summary": final[:600] or "The research agent did not return a usable answer.", "bull_case": [],
+               "bear_case": [], "news_sentiment": "unknown", "event_risk": "unknown", "sources": [], "scores": {},
+               "parse_error": True}
     out = score_result(out, side, mode)
     out["setup"] = setup
     out["steps"] = steps

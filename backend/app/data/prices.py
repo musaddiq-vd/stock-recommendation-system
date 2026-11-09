@@ -1,6 +1,7 @@
 """Daily OHLCV from yfinance with a parquet cache per symbol."""
 import datetime as dt
 import logging
+import threading
 import warnings
 
 import pandas as pd
@@ -59,7 +60,16 @@ def _clean(df: pd.DataFrame, daily: bool = True) -> pd.DataFrame:
     return df.dropna(subset=["close"])
 
 
+_refresh_lock = threading.Lock()
+
+
 def load_many(symbols: list[str], force: bool = False) -> dict[str, pd.DataFrame]:
+    """Cached daily bars; stale symbols are refreshed under a lock so two threads never write one file."""
+    with _refresh_lock:
+        return _load_many(symbols, force)
+
+
+def _load_many(symbols: list[str], force: bool = False) -> dict[str, pd.DataFrame]:
     import time as _t
 
     out, stale = {}, []

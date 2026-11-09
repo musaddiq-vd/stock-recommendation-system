@@ -174,8 +174,21 @@ def for_symbol(symbol: str) -> pd.DataFrame | None:
     return _cache["by_sym"].get(symbol)
 
 
-def fii_dii() -> dict:
-    """Today's FII/DII cash market net flows (Rs crore); also appended to a local history file."""
+_fii_cache: dict = {"ts": 0.0, "data": {}}
+
+
+def fii_dii(max_age: int = 600) -> dict:
+    """Today's FII/DII net flows (Rs crore), cached for `max_age` seconds."""
+    if time.time() - _fii_cache["ts"] < max_age and _fii_cache["data"]:
+        return _fii_cache["data"]
+    data = _fetch_fii_dii()
+    if data:
+        _fii_cache.update(ts=time.time(), data=data)
+    return data or _fii_cache["data"]
+
+
+def _fetch_fii_dii() -> dict:
+    """Fetch today's FII/DII cash market net flows; also appended to a local history file."""
     s = requests.Session()
     s.headers.update(UA)
     try:

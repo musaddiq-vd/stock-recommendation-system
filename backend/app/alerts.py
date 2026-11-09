@@ -75,6 +75,6 @@ def pick_outcome(pick_row: dict, outcome: str, ret: float | None) -> None:
         return
     emoji = "🎯" if outcome == "target" else "🛑"
     pct = f" ({ret * 100:+.1f}%)" if ret is not None else ""
-    send_once(f"pick:{pick_row['id']}:{outcome}",
+    send_once(f"pick:{pick_row['symbol']}:{pick_row['as_of']}:{outcome}",
               f"{emoji} <b>{pick_row['symbol']}</b> recommendation hit <b>{outcome.upper()}</b>{pct}\n"
               f"Entry ₹{pick_row['entry']} · Target ₹{pick_row['target']} · Stop ₹{pick_row['stop_loss']}")

@@ -22,6 +22,7 @@ CREATE INDEX IF NOT EXISTS picks_scan ON picks(scan_id);
 def conn():
     c = sqlite3.connect(DB_PATH, timeout=30)
     c.row_factory = sqlite3.Row
+    c.execute("PRAGMA busy_timeout=30000")
     try:
         yield c
         c.commit()
@@ -31,7 +32,10 @@ def conn():
 
 def init():
     with conn() as c:
+        c.execute("PRAGMA journal_mode=WAL")  # readers do not block the scan thread's writes
         c.executescript(SCHEMA)
+        # a scan cannot survive a restart: close any left "running" so the dashboard stops polling it
+        c.execute("UPDATE scans SET status='error', error='Interrupted by a server restart' WHERE status='running'")
 
 
 def create_scan(universe, sector, mode) -> int:
@@ -106,9 +110,12 @@ def set_outcome(pick_id, outcome, ret, days):
 
 
 def performance():
+    # the same stock recommended on the same day by several scans is one trade, not many
     with conn() as c:
         rows = [dict(r) for r in c.execute(
-            "SELECT tier, outcome, outcome_ret FROM picks WHERE outcome IN ('target','stop','timeout')").fetchall()]
+            "SELECT tier, outcome, outcome_ret FROM picks WHERE id IN ("
+            " SELECT MAX(id) FROM picks WHERE outcome IN ('target','stop','timeout') GROUP BY symbol, as_of)"
+        ).fetchall()]
     out = {}
     for r in rows:
         t = out.setdefault(r["tier"], {"trades": 0, "wins": 0, "sum_ret": 0.0})
