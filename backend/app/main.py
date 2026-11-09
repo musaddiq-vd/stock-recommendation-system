@@ -20,7 +20,7 @@ from .agents.orchestrator import ScanBusy, market_regime, scan_running, start_sc
 from .agents.tools import get_fundamentals, get_technicals
 from .chat import chat_stream
 from .data import nse
-from .data.prices import load
+from .data.prices import expected_last_bar, load
 from .model.train import load_model, train_all
 from .universe import get_universe
 
@@ -39,10 +39,32 @@ def daily_job():
             step()
         except Exception:
             log.exception("daily step failed")
+    check_data_freshness()
     try:
         start_scan("NIFTY500", None)
     except ScanBusy:
         log.warning("daily scan skipped: another scan is running")
+
+
+def check_data_freshness() -> None:
+    """Alert when market data stops updating (Yahoo / NSE outage), since every pick would then be stale."""
+    try:
+        bars = load(BENCHMARK)
+        last = bars.index[-1].date() if bars is not None else None
+        expected = expected_last_bar()
+        if last is None or (expected - last).days > 3:  # allows for weekends and single holidays
+            alerts.ops_alert(f"stale:{expected}", f"market data is stale (last bar {last}, expected {expected}). "
+                                                  "Picks are not reliable until it updates.")
+    except Exception:
+        log.exception("freshness check failed")
+
+
+def weekly_job():
+    try:
+        alerts.send(alerts.weekly_summary(db.latest_scan(), db.performance(SCORING_VERSION),
+                                          paper.portfolio()))
+    except Exception:
+        log.exception("weekly summary failed")
 
 
 def intraday_job():
@@ -65,6 +87,7 @@ async def lifespan(app):
         scheduler.add_job(intraday_job, "cron", day_of_week="mon-fri", hour="9-15", minute="*/15", id="intraday",
                           replace_existing=True)
         # Markets change: retrain both models on fresh data on the 1st Saturday of every month
+        scheduler.add_job(weekly_job, "cron", day_of_week="sat", hour=9, id="weekly", replace_existing=True)
         scheduler.add_job(train_all, "cron", day="1-7", day_of_week="sat", hour=10, id="retrain",
                           replace_existing=True)
         scheduler.start()

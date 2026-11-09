@@ -162,3 +162,30 @@ def test_outcome_method_migration_resets_old_outcomes():
     db.init_extra()
     assert any(p["id"] == pid for p in db.open_picks())  # recomputed under the new method
     assert "outcome_method" not in db.get_settings()
+
+
+def test_weekly_summary_text():
+    from app import alerts
+
+    scan = {"id": 7, "market": {"above_ema200": True, "breadth200": 0.62},
+            "picks": [{"symbol": "TCS", "tier": "strong"}, {"symbol": "INFY", "tier": "watch"}]}
+    perf = {"version": "7", "tiers": {"strong": {"closed": 4, "open": 2, "win_rate": 0.5, "avg_ret": 0.012}}}
+    text = alerts.weekly_summary(scan, perf, {"trades": [], "equity": 0, "return_pct": 0, "open": 0})
+    assert "Market gate: <b>open</b>" in text and "TCS" in text and "INFY" not in text
+    assert "50% profitable" in text and "+1.2%" in text
+
+
+def test_stale_data_raises_one_ops_alert(monkeypatch):
+    import datetime as dt
+
+    sent = []
+    monkeypatch.setattr(main.alerts, "ops_alert", lambda key, text: sent.append(key))
+    bars = pd.DataFrame({"close": [1.0]}, index=[pd.Timestamp("2026-10-01")])
+    monkeypatch.setattr(main, "load", lambda s: bars)
+    monkeypatch.setattr(main, "expected_last_bar", lambda: dt.date(2026, 11, 6))
+    main.check_data_freshness()
+    assert sent == ["stale:2026-11-06"]
+    monkeypatch.setattr(main, "expected_last_bar", lambda: dt.date(2026, 10, 2))
+    sent.clear()
+    main.check_data_freshness()
+    assert sent == []  # one session behind is normal

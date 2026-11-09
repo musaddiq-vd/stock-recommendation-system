@@ -192,6 +192,7 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
     except Exception as e:
         log.exception("scan failed")
         db.update_scan(scan_id, status="error", error=str(e)[:500])
+        alerts.ops_alert(f"scan:{scan_id}", f"scan #{scan_id} ({universe}) failed: {str(e)[:200]}")
 
 
 def scan_running() -> bool:
