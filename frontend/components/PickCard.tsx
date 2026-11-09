@@ -19,7 +19,7 @@ export default function PickCard({ p, onOpen, settings, stat }: {
 }) {
   const s = TIER_STYLE[p.tier];
   const l = p.levels;
-  const size = positionSize(p, settings);
+  const size = p.tier === "strong" ? positionSize(p, settings) : null; // only Buy calls get a size
   return (
     <button
       onClick={onOpen}

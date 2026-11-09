@@ -292,5 +292,6 @@ function Legend({ cls, t }: { cls: string; t: string }) {
   return <span className="flex items-center gap-1.5"><span className={`h-2.5 w-2.5 rounded-sm ${cls}`} />{t}</span>;
 }
 function Flow({ v }: { v: number }) {
-  return <b className={v >= 0 ? "text-emerald-400" : "text-red-400"}>{v >= 0 ? "+" : ""}{Math.round(v).toLocaleString("en-IN")}</b>;
+  const n = Math.round(v) || 0; // avoid "-0" for tiny outflows
+  return <b className={n >= 0 ? "text-emerald-400" : "text-red-400"}>{n > 0 ? "+" : ""}{n.toLocaleString("en-IN")}</b>;
 }

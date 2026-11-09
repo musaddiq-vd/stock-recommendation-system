@@ -102,11 +102,16 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
 
         <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
           <div className="text-sm font-semibold text-zinc-200">Position size & paper trade</div>
+          {pick.tier !== "strong" && (
+            <p className="text-xs text-amber-300 mt-1">
+              Not a Buy call ({pick.tier}): the size below is only for a practice paper trade.
+            </p>
+          )}
           {size && (
             <p className="text-xs text-zinc-400 mt-1">
               Capital {inr(+settings!.capital)} · risk {settings!.risk_pct}% = max loss {inr(size.riskAmt)} per trade.{" "}
               {size.qty > 0 ? (
-                <>Suggested: <b className="text-white">{size.qty} shares</b>, invest {inr(size.invest)},
+                <>{pick.tier === "strong" ? "Suggested" : "Size"}: <b className="text-white">{size.qty} shares</b>, invest {inr(size.invest)},
                   stop hit = <span className="text-red-400">-{inr(size.maxLoss)}</span>, target = <span className="text-emerald-400">+{inr(size.profit)}</span></>
               ) : <span className="text-amber-300">{size.note}</span>}
             </p>
