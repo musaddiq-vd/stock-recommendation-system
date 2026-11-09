@@ -9,10 +9,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 
 from .. import alerts, db
-from ..config import (AGENT_TOP_N, HOLD_MAX_DAYS, HOLD_MIN_DAYS, MIN_AVG_TRADED_VALUE, REGIME_FILTER, RUBRIC_MIN,
+from ..config import (AGENT_TOP_N, BREADTH_MIN, HOLD_MAX_DAYS, HOLD_MIN_DAYS, MIN_AVG_TRADED_VALUE, ML_TOP_PCT,
                       SCORING_VERSION,
                       STOP_ATR)
 from ..data import nse
@@ -20,7 +21,7 @@ from ..data.events import window_event
 from ..data.live import live_quotes
 from ..data.prices import benchmark, load_many
 from ..features import add_cross_sectional, compute
-from ..model.train import load_model, prob_percentile
+from ..model.train import load_model
 from ..research.rubric_proxy import proxy_components
 from ..universe import get_index, get_universe
 from .research_agent import research
@@ -28,7 +29,6 @@ from .tools import get_technicals
 
 log = logging.getLogger(__name__)
 _scan_lock = threading.Lock()  # one scan at a time: scans are long, hit Bedrock and share the price cache
-STRONG_AT, GOOD_AT = 85, 72
 
 
 class ScanBusy(RuntimeError):
@@ -68,6 +68,9 @@ def score_universe() -> pd.DataFrame:
     data = add_cross_sectional(data)
     m = load_model()
     data["prob"] = m["model"].predict_proba(data[m["features"]].astype(float))[:, 1]
+    # today's cross-sectional rank among liquid stocks, exactly how the backtest picked its "top 2%" each day
+    liquid = data.traded_value_20 >= MIN_AVG_TRADED_VALUE
+    data["xs_pct"] = np.floor(data.prob.where(liquid).rank(pct=True) * 100).fillna(0).astype(int)
     comps = proxy_components(data, "long", STOP_ATR)
     data["rubric"] = (comps.sum(axis=1) / 60 * 100).values
     data["rubric_parts"] = comps.round(1).to_dict("records")
@@ -84,39 +87,28 @@ def hist_stats(prob: float) -> dict:
     return best or {"win_rate": bt["base_win_rate"], "avg_ret": 0.0}
 
 
-def tier(score: float, verdict: str, gates: dict) -> str:
-    """Each tier maps to one variant of the 22-year walk-forward, so its published stats are real:
-    strong = ML top + regime + rubric (+ agent clear); good = ML top + regime (+ agent clear)."""
+def tier(verdict: str, gates: dict) -> str:
+    """One Buy tier ("strong"), and only when every gate passes: it maps exactly to the live-setting variant of
+    the survivorship-free walk-forward (ML top 2% + breadth), with the agent able to veto."""
     if verdict == "avoid":
         return "avoid"
-    if verdict != "buy":
-        return "watch"
-    if score >= STRONG_AT and all(gates.values()):
-        return "strong"
-    if score >= GOOD_AT and gates.get("regime"):
-        return "good"
-    return "watch"
+    return "strong" if verdict == "buy" and all(gates.values()) else "watch"
 
 
 def judge(row, market: dict, res: dict, ml_pct: int) -> dict:
-    """Combine the validated score, the gates and the agent's veto into the published pick fields."""
-    rubric = float(row.rubric)
-    score = 0.6 * ml_pct + 0.4 * rubric
-    if market["regime"] == "bearish":
-        score -= 8  # buying against the market trend
+    """Gates + the agent's veto -> the published pick fields. The score is the ML percentile: the rule-based
+    rubric, an ensemble and probability calibration did not improve the survivorship-free backtest, so they
+    do not move the decision (the rubric is still shown for context)."""
     official = window_event(row.symbol)  # the official NSE calendar overrides the agent's guess
     if official:
         res["event_in_window"] = True
         res["event_risk"] = f"{official['purpose']} on {official['date']} (official NSE calendar)"
-    if res.get("event_in_window"):
-        score -= 4
     agent_ok = (not res.get("parse_error") and not res.get("red_flags") and res.get("news_sentiment") != "negative"
                 and not res.get("event_in_window"))
-    gates = {"regime": bool(market["above_ema200"]) if REGIME_FILTER else True,
-             "rubric": rubric >= RUBRIC_MIN, "agent": bool(agent_ok)}
+    gates = {"ml_top": ml_pct >= ML_TOP_PCT, "breadth": market.get("breadth50", 0) > BREADTH_MIN,
+             "agent": bool(agent_ok)}
     verdict = "avoid" if res.get("red_flags") else "buy" if agent_ok else "watch"
-    score = round(score, 1)
-    return {"score": score, "verdict": verdict, "gates": gates, "tier": tier(score, verdict, gates),
+    return {"score": float(ml_pct), "verdict": verdict, "gates": gates, "tier": tier(verdict, gates),
             "official_event": official}
 
 
@@ -138,6 +130,10 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
             market["flows"] = {}
         db.update_scan(scan_id, market=market)
         scored = score_universe()
+        # market breadth: share of liquid Nifty 500 stocks above their 50-day average
+        liquid = scored[scored.traded_value_20 >= MIN_AVG_TRADED_VALUE]
+        market["breadth50"] = round(float((liquid.dist_ema50 > 0).mean()), 3)
+        db.update_scan(scan_id, market=market)
         members = set(get_index(universe).symbol)
         pool = scored[scored.symbol.isin(members) & (scored.traded_value_20 >= MIN_AVG_TRADED_VALUE)]
         if sector:
@@ -166,7 +162,7 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
                 if "trade_levels" not in snap:
                     log_step(f"{r.symbol}: no price data, skipped")
                     continue
-                ml_pct = prob_percentile(float(r.prob))
+                ml_pct = int(r.xs_pct)
                 j = judge(r, market, res, ml_pct)
                 hs = hist_stats(float(r.prob))
                 picks.append({
@@ -180,12 +176,12 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
                     "technicals": {k: v for k, v in snap.items() if k not in ("last_30_closes", "trade_levels")},
                     "research": {**res, "verdict": j["verdict"]},
                 })
-                log_step(f"{r.symbol}: {j['tier']} (ML top {max(1, 100 - ml_pct)}%, rubric {r.rubric:.0f}, "
-                         f"agent {'clear' if j['gates']['agent'] else 'flagged'}) → score {j['score']}")
+                log_step(f"{r.symbol}: {'Buy' if j['tier'] == 'strong' else j['tier']} (ML top {max(1, 100 - ml_pct)}%, "
+                         f"agent {'clear' if j['gates']['agent'] else 'flagged'})")
         picks.sort(key=lambda p: -p["score"])
         db.save_picks(scan_id, picks)
         db.update_scan(scan_id, status="done")
-        log_step(f"Done: {sum(p['tier'] == 'strong' for p in picks)} strong, {sum(p['tier'] == 'good' for p in picks)} good")
+        log_step(f"Done: {sum(p['tier'] == 'strong' for p in picks)} Buy, breadth {market['breadth50']:.0%}")
         try:
             alerts.scan_summary(db.get_scan(scan_id))
         except Exception:
@@ -220,25 +216,37 @@ def start_scan(universe="NIFTY100", sector=None, top_n=AGENT_TOP_N) -> int:
 
 
 def evaluate(p: dict, bars: pd.DataFrame, quote: dict | None) -> tuple[str, float | None, int]:
-    """Outcome of one long pick: target / stop / timeout / open, its return and bars held.
-    Bars strictly after the recommendation day count; stop wins when both are touched in one bar."""
+    """Outcome of one long pick as a user could actually trade it: target / stop / timeout / skipped / open.
+
+    Bought at the OPEN of the first session after the recommendation (not the close it was computed on),
+    with the published target and stop. A gap through a level fills at that day's open, so a gap below the
+    stop loses more than the stop. If the stock already opens beyond the target or stop on entry day, the
+    trade is not taken ("skipped"). Stop wins when both levels are touched in one bar."""
+    stop, target = p["stop_loss"], p["target"]
     after = bars[bars.index > pd.Timestamp(p["as_of"])].head(HOLD_MAX_DAYS)
+    if after.empty:
+        return "open", None, 0
+    entry = float(after.open.iloc[0])
+    if not (stop < entry < target):
+        return "skipped", None, 0
     for i, row in enumerate(after.itertuples(), 1):
-        if row.low <= p["stop_loss"]:
-            return "stop", p["stop_loss"] / p["entry"] - 1, i
-        if row.high >= p["target"]:
-            return "target", p["target"] / p["entry"] - 1, i
+        if i > 1 and row.open <= stop:
+            return "stop", row.open / entry - 1, i
+        if row.low <= stop:
+            return "stop", stop / entry - 1, i
+        if i > 1 and row.open >= target:
+            return "target", row.open / entry - 1, i
+        if row.high >= target:
+            return "target", target / entry - 1, i
     if len(after) >= HOLD_MAX_DAYS:
-        return "timeout", float(after.close.iloc[-1] / p["entry"] - 1), len(after)
+        return "timeout", float(after.close.iloc[-1] / entry - 1), len(after)
     # today's intraday bar is not in the daily history yet
-    last_daily = str(after.index[-1].date()) if len(after) else p["as_of"]
-    if quote and quote["date"] > last_daily:
-        if quote["low"] <= p["stop_loss"]:
-            return "stop", p["stop_loss"] / p["entry"] - 1, len(after) + 1
-        if quote["high"] >= p["target"]:
-            return "target", p["target"] / p["entry"] - 1, len(after) + 1
-    ret = float(after.close.iloc[-1] / p["entry"] - 1) if len(after) else None
-    return "open", ret, len(after)
+    if quote and quote["date"] > str(after.index[-1].date()):
+        if quote["low"] <= stop:
+            return "stop", stop / entry - 1, len(after) + 1
+        if quote["high"] >= target:
+            return "target", target / entry - 1, len(after) + 1
+    return "open", float(after.close.iloc[-1] / entry - 1), len(after)
 
 
 def update_outcomes(use_live: bool = False) -> int:

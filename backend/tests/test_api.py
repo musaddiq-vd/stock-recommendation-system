@@ -102,14 +102,12 @@ def test_paper_trade_opens_at_current_price(monkeypatch):
 
 
 def test_tier_rules():
-    ok = {"regime": True, "rubric": True, "agent": True}
-    assert orchestrator.tier(90, "buy", ok) == "strong"
-    assert orchestrator.tier(90, "buy", {**ok, "rubric": False}) == "good"
-    assert orchestrator.tier(90, "buy", {**ok, "regime": False}) == "watch"  # no regime, no tier backed by data
-    assert orchestrator.tier(80, "buy", ok) == "good"
-    assert orchestrator.tier(90, "buy", {"regime": False, "rubric": False, "agent": True}) == "watch"
-    assert orchestrator.tier(95, "watch", ok) == "watch"
-    assert orchestrator.tier(95, "avoid", ok) == "avoid"
+    ok = {"ml_top": True, "breadth": True, "agent": True}
+    assert orchestrator.tier("buy", ok) == "strong"
+    for gate in ok:  # every gate is required: the Buy tier maps to exactly one backtested variant
+        assert orchestrator.tier("buy", {**ok, gate: False}) == "watch"
+    assert orchestrator.tier("watch", ok) == "watch"
+    assert orchestrator.tier("avoid", ok) == "avoid"
 
 
 def test_settings_have_no_short_selling_fields(client):
@@ -131,3 +129,36 @@ def test_track_record_counts_each_trade_once():
     assert len([r for r in perf["recent"] if r["symbol"] == "TCS"]) == 1
     assert not any(r["symbol"] == "INFY" for r in perf["recent"])  # other rule sets never mix in
     assert perf["earlier_version_picks"] >= 1
+
+
+def test_agent_veto_check_splits_cleared_and_vetoed():
+    db.init()
+    base = {"levels": {"entry": 100, "target": 110, "stop_loss": 95}, "as_of": "2026-02-02", "score": 80,
+            "tier": "strong", "scoring_version": "veto-v"}
+    picks = [{**base, "symbol": "AAA", "gates": {"ml_top": True, "breadth": True, "agent": True}},
+             {**base, "symbol": "BBB", "gates": {"ml_top": True, "breadth": True, "agent": False}, "tier": "watch"},
+             {**base, "symbol": "CCC", "gates": {"ml_top": True, "breadth": False, "agent": False}, "tier": "watch"}]
+    sid = db.create_scan("NIFTY50", None, "news")
+    db.save_picks(sid, picks)
+    for p in db.open_picks():
+        if p["symbol"] in ("AAA", "BBB", "CCC"):
+            db.set_outcome(p["id"], "target" if p["symbol"] == "AAA" else "stop", 0.1 if p["symbol"] == "AAA" else -0.05, 3)
+    chk = db.performance("veto-v")["agent_check"]
+    assert chk["cleared"]["closed"] == 1 and chk["cleared"]["win_rate"] == 1.0
+    assert chk["vetoed"]["closed"] == 1  # CCC failed the market gates, so it is not part of the comparison
+
+
+def test_outcome_method_migration_resets_old_outcomes():
+    db.init()
+    db.init_extra()
+    sid = db.create_scan("NIFTY50", None, "news")
+    db.save_picks(sid, [{"symbol": "ZZM", "levels": {"entry": 1, "target": 2, "stop_loss": 0.5}, "as_of": "2026-01-01",
+                         "score": 1, "tier": "watch"}])
+    pid = [p for p in db.open_picks() if p["symbol"] == "ZZM"][0]["id"]
+    db.set_outcome(pid, "target", 0.5, 2)
+    db.set_settings({})  # no-op
+    with db.conn() as c:
+        c.execute("UPDATE settings SET value='old' WHERE key='outcome_method'")
+    db.init_extra()
+    assert any(p["id"] == pid for p in db.open_picks())  # recomputed under the new method
+    assert "outcome_method" not in db.get_settings()

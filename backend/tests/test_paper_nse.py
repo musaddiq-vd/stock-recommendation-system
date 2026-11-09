@@ -9,6 +9,8 @@ def test_check_bar_long():
     assert check_bar(t, 111, 100) == ("target", 110)
     assert check_bar(t, 111, 94) == ("stop", 95)  # both touched: stop wins
     assert check_bar(t, 105, 99) is None
+    assert check_bar(t, 92, 88, open_=90) == ("stop", 90)  # gap below the stop fills at the open
+    assert check_bar(t, 115, 111, open_=112) == ("target", 112)
 
 
 def _bars(rows, start="2026-10-01"):
@@ -38,6 +40,15 @@ def test_evaluate_ignores_bars_before_recommendation():
     assert orchestrator.evaluate(PICK, bars, None)[0] == "open"
 
 
+def test_evaluate_entry_at_next_open_with_gaps():
+    # bought at the 102 open, then gapped down to 90 through the 95 stop: loss is open-to-open
+    bars = _bars([[102, 103, 100, 101, 1], [90, 91, 89, 90, 1]])
+    out, ret, days = orchestrator.evaluate(PICK, bars, None)
+    assert out == "stop" and round(ret, 4) == round(90 / 102 - 1, 4) and days == 2
+    # opened above the target on entry day: the trade is never taken
+    assert orchestrator.evaluate(PICK, _bars([[112, 113, 111, 112, 1]]), None)[0] == "skipped"
+
+
 def test_evaluate_uses_live_bar_for_today():
     bars = _bars([[100, 102, 98, 101, 1]])
     quote = {"date": "2026-10-02", "high": 112, "low": 100}
@@ -47,7 +58,7 @@ def test_evaluate_uses_live_bar_for_today():
 def test_judge_gates_and_veto(monkeypatch):
     monkeypatch.setattr(orchestrator, "window_event", lambda s: None)
     row = type("R", (), {"rubric": 80.0, "symbol": "TCS"})()
-    bull = {"regime": "bullish", "above_ema200": True}
+    bull = {"regime": "bullish", "above_ema200": True, "breadth50": 0.62}
     clear = {"news_sentiment": "positive", "red_flags": [], "event_in_window": False, "parse_error": False}
     j = orchestrator.judge(row, bull, dict(clear), 99)
     assert j["tier"] == "strong" and all(j["gates"].values())
@@ -59,3 +70,12 @@ def test_judge_gates_and_veto(monkeypatch):
     monkeypatch.setattr(orchestrator, "window_event", lambda s: {"purpose": "Financial Results", "date": "2026-11-12"})
     j = orchestrator.judge(row, bull, dict(clear), 99)
     assert j["gates"]["agent"] is False and j["tier"] == "watch"
+
+
+def test_judge_needs_top_rank_and_breadth(monkeypatch):
+    monkeypatch.setattr(orchestrator, "window_event", lambda s: None)
+    row = type("R", (), {"rubric": 80.0, "symbol": "TCS"})()
+    clear = {"news_sentiment": "neutral", "red_flags": [], "event_in_window": False, "parse_error": False}
+    assert orchestrator.judge(row, {"breadth50": 0.62}, dict(clear), 97)["tier"] == "watch"  # not top 2%
+    assert orchestrator.judge(row, {"breadth50": 0.41}, dict(clear), 99)["tier"] == "watch"  # weak breadth
+    assert orchestrator.judge(row, {"breadth50": 0.62}, dict(clear), 99)["tier"] == "strong"

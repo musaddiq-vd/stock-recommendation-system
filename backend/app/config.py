@@ -27,9 +27,9 @@ HISTORY_PERIOD = os.getenv("HISTORY_PERIOD", "6y")
 MIN_AVG_TRADED_VALUE = float(os.getenv("MIN_AVG_TRADED_VALUE", 5e7))  # Rs 5 cr/day
 AGENT_TOP_N = int(os.getenv("AGENT_TOP_N", 15))
 
-# Gates validated on 22 years of walk-forward data (see app/research)
-REGIME_FILTER = os.getenv("REGIME_FILTER", "1") == "1"   # long "strong" picks only when Nifty > 200 EMA
-RUBRIC_MIN = float(os.getenv("RUBRIC_MIN", 70))            # rule-based rubric score needed for "strong"
+# Rules chosen by the survivorship-free 22-year walk-forward (app/research/v2.py, delisted stocks included)
+ML_TOP_PCT = float(os.getenv("ML_TOP_PCT", 98))         # only the top 2% of the daily ML ranking can be a Buy
+BREADTH_MIN = float(os.getenv("BREADTH_MIN", 0.5))      # Buy only when > 50% of stocks are above their 50-day average
 
 BENCHMARK = "^NSEI"
 
@@ -40,4 +40,4 @@ RUN_SCHEDULER = os.getenv("RUN_SCHEDULER", "1") == "1"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Bump when tiers or scoring rules change, so the live track record never mixes different rule sets
-SCORING_VERSION = "3"
+SCORING_VERSION = "5"

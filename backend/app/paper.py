@@ -22,18 +22,18 @@ def _exit(t, status, price, date):
     return pnl
 
 
-def check_bar(t, high, low):
-    """('stop'|'target', price) if this bar touches a barrier. Stop first when both (conservative)."""
-    if t["side"] == "long":
-        if low <= t["stop_loss"]:
-            return "stop", t["stop_loss"]
-        if high >= t["target"]:
-            return "target", t["target"]
-    else:
-        if high >= t["stop_loss"]:
-            return "stop", t["stop_loss"]
-        if low <= t["target"]:
-            return "target", t["target"]
+def check_bar(t, high, low, open_: float | None = None):
+    """('stop'|'target', fill price) if this bar touches a level. A gap through a level fills at the open
+    (worse than the stop, better than the target). Stop first when both are touched (conservative)."""
+    stop, target = t["stop_loss"], t["target"]
+    if open_ is not None and open_ <= stop:
+        return "stop", open_
+    if low <= stop:
+        return "stop", stop
+    if open_ is not None and open_ >= target:
+        return "target", open_
+    if high >= target:
+        return "target", target
     return None
 
 
@@ -50,7 +50,7 @@ def update_all(use_live: bool = True) -> None:
         bars = df[df.index > pd.Timestamp(t["opened_on"])] if df is not None else pd.DataFrame()
         closed = False
         for i, (d, r) in enumerate(bars.iterrows(), 1):
-            hit = check_bar(t, r.high, r.low)
+            hit = check_bar(t, r.high, r.low, r.open)
             if hit:
                 _exit(t, hit[0], hit[1], d.date())
                 closed = True

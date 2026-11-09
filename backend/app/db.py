@@ -102,6 +102,7 @@ def list_scans(limit=20):
 def open_picks():
     with conn() as c:
         return [dict(r) for r in c.execute("SELECT * FROM picks WHERE outcome IS NULL OR outcome='open'").fetchall()]
+        # "skipped" (gapped past a level before entry) and closed outcomes are final
 
 
 def set_outcome(pick_id, outcome, ret, days):
@@ -121,30 +122,40 @@ def performance(version: str, recent: int = 25) -> dict:
     """
     with conn() as c:
         rows = [dict(r) for r in c.execute(
-            "SELECT symbol, as_of, tier, entry, target, stop_loss, outcome, outcome_ret, outcome_days FROM picks "
+            "SELECT symbol, as_of, tier, entry, target, stop_loss, outcome, outcome_ret, outcome_days, "
+            "json_extract(data, '$.gates.agent') AS agent_clear, "
+            "json_extract(data, '$.gates.ml_top') AND json_extract(data, '$.gates.breadth') AS market_gates "
+            "FROM picks "
             "WHERE id IN (SELECT MAX(id) FROM picks GROUP BY symbol, as_of) AND outcome IS NOT 'retired' "
             "AND json_extract(data, '$.scoring_version') = ? ORDER BY as_of DESC", (version,)).fetchall()]
         legacy = c.execute(
             "SELECT COUNT(DISTINCT symbol || as_of) FROM picks WHERE json_extract(data, '$.scoring_version') IS NOT ?",
             (version,)).fetchone()[0]
-    tiers = {}
+    tiers = {k: _stats(g) for k, g in _group(rows, lambda r: r["tier"]).items()}
+    # Agent veto check: same setup (ML top 2% + breadth passed), agent cleared vs agent vetoed.
+    # If vetoed picks do as well as cleared ones, the veto is not earning its keep.
+    eligible = [r for r in rows if r["market_gates"]]
+    agent = {k: _stats(g) for k, g in _group(eligible, lambda r: "cleared" if r["agent_clear"] else "vetoed").items()}
+    closed = [{k: v for k, v in r.items() if k not in ("agent_clear", "market_gates")}
+              for r in rows if r["outcome"] in CLOSED][:recent]
+    return {"version": version, "tiers": tiers, "agent_check": agent, "recent": closed,
+            "earlier_version_picks": legacy}
+
+
+def _group(rows, key):
+    out = {}
     for r in rows:
-        t = tiers.setdefault(r["tier"], {"closed": 0, "open": 0, "wins": 0, "sum_ret": 0.0, "targets": 0})
-        if r["outcome"] in CLOSED:
-            t["closed"] += 1
-            t["wins"] += (r["outcome_ret"] or 0) > 0
-            t["targets"] += r["outcome"] == "target"
-            t["sum_ret"] += r["outcome_ret"] or 0
-        else:
-            t["open"] += 1
-    summary = {
-        k: {"closed": v["closed"], "open": v["open"],
-            "win_rate": round(v["wins"] / v["closed"], 3) if v["closed"] else None,
-            "target_rate": round(v["targets"] / v["closed"], 3) if v["closed"] else None,
-            "avg_ret": round(v["sum_ret"] / v["closed"], 4) if v["closed"] else None}
-        for k, v in tiers.items()}
-    closed = [r for r in rows if r["outcome"] in CLOSED][:recent]
-    return {"version": version, "tiers": summary, "recent": closed, "earlier_version_picks": legacy}
+        out.setdefault(key(r), []).append(r)
+    return out
+
+
+def _stats(rows) -> dict:
+    closed = [r for r in rows if r["outcome"] in CLOSED]
+    n = len(closed)
+    return {"closed": n, "open": len(rows) - n,
+            "win_rate": round(sum((r["outcome_ret"] or 0) > 0 for r in closed) / n, 3) if n else None,
+            "target_rate": round(sum(r["outcome"] == "target" for r in closed) / n, 3) if n else None,
+            "avg_ret": round(sum(r["outcome_ret"] or 0 for r in closed) / n, 4) if n else None}
 
 
 # ---------- settings / paper trades / alerts ----------
@@ -160,15 +171,25 @@ DEFAULT_SETTINGS = {"capital": "500000", "risk_pct": "1", "alerts_enabled": "1",
                     "telegram_bot_token": "", "telegram_chat_id": ""}
 
 
+OUTCOME_METHOD = "next-open-gap-v1"  # change when the way outcomes are measured changes
+
+
 def init_extra():
     with conn() as c:
         c.executescript(EXTRA_SCHEMA)
+        # Outcomes measured under an older method are reset once, so the track record never mixes methods;
+        # the next outcome update recomputes them all from prices.
+        row = c.execute("SELECT value FROM settings WHERE key='outcome_method'").fetchone()
+        if not row or row[0] != OUTCOME_METHOD:
+            c.execute("UPDATE picks SET outcome=NULL, outcome_ret=NULL, outcome_days=NULL WHERE outcome IS NOT 'retired'")
+            c.execute("INSERT INTO settings(key, value) VALUES ('outcome_method', ?) "
+                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (OUTCOME_METHOD,))
 
 
 def get_settings() -> dict:
     with conn() as c:
         rows = dict(c.execute("SELECT key, value FROM settings").fetchall())
-    return {**DEFAULT_SETTINGS, **rows}
+    return {**DEFAULT_SETTINGS, **{k: v for k, v in rows.items() if k in DEFAULT_SETTINGS}}
 
 
 def set_settings(values: dict):
