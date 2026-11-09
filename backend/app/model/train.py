@@ -1,4 +1,4 @@
-"""Train a LightGBM model on pooled Nifty 500 data with a time-based split."""
+"""Train the live LightGBM model (point-in-time universe when available) with a time-based holdout."""
 import json
 import logging
 
@@ -144,39 +144,50 @@ def simulate_portfolio(te: pd.DataFrame, threshold: float, slots: int = 10, cost
     }
 
 
-def quality(report: dict) -> float:
-    """Average per-trade return of the backtest buckets with enough trades (what we actually trade)."""
-    rows = [r["avg_ret"] for r in report["backtest"]["by_threshold"] if r["trades"] >= 100]
-    return float(np.mean(rows)) if rows else -1.0
+def point_in_time_data(refresh: bool = False) -> pd.DataFrame | None:
+    """Training rows from the point-in-time universe (stocks as they were each month, incl. later-delisted ones).
+
+    A model trained on today's survivors scored profit factor 1.13 on the honest universe, against 1.36 when
+    trained point-in-time (app/research/training_data.py), so this is the preferred source. With refresh=True the
+    NSE bhavcopies are topped up and the dataset rebuilt first (the monthly retrain does this)."""
+    from ..research import pit, v2
+
+    path = v2.OUT / "dataset_pit.parquet"
+    if refresh and (pit.DIR / "prices.parquet").exists():
+        pit.download(start=str((pd.Timestamp.now() - pd.Timedelta(days=75)).date()))
+        pit.build()
+        v2.build("pit")
+    if not path.exists():
+        return None
+    d = pd.read_parquet(path)
+    return d.rename(columns={"y_open": "y", "r_open": "trade_ret", "d_open": "days_held"})
 
 
-def train(symbols: list[str] | None = None, test_months: int = 12, side: str = "long",
-          feature_sets: dict | None = None) -> dict:
-    """Trains each candidate feature set on the same split; keeps the one with the better backtest."""
-    data = build_dataset(symbols, side)
-    data = data.dropna(subset=BASE_FEATURES + ["y"])
+def train(test_months: int = 12, refresh: bool = False) -> dict:
+    """Train the live model; the last `test_months` are held out for the report, then it is refit on everything."""
+    feats = BASE_FEATURES
+    data = point_in_time_data(refresh)
+    source = "point-in-time universe incl. delisted stocks"
+    if data is None:
+        log.warning("point-in-time data missing: training on today's Nifty 500 only (weaker, see README)")
+        data, source = build_dataset(), "today's Nifty 500 (survivors only)"
+    data = data.dropna(subset=feats + ["y"])
     data = data[data.traded_value_20 > 1e7]
-    feature_sets = feature_sets or {"base": BASE_FEATURES}
-    results = {name: _fit_eval(data, feats, test_months, side)[0] for name, feats in feature_sets.items()}
-    best = max(results, key=lambda k: quality(results[k]))
-    feats = feature_sets[best]
-    report = results[best]
-    report["feature_set"] = best
-    report["comparison"] = {k: {"auc": v["auc"], "quality": round(quality(v), 4),
-                                "by_threshold": v["backtest"]["by_threshold"]} for k, v in results.items()}
+    report, _ = _fit_eval(data, feats, test_months, "long")
+    report["training_source"] = source
     final = lgb.LGBMClassifier(**PARAMS)
     final.fit(data[feats], data.y)
-    report["feature_importance"] = sorted(zip(feats, final.feature_importances_.tolist(), strict=False), key=lambda x: -x[1])
-    joblib.dump({"model": final, "features": feats, "report": report}, model_path(side))
-    name = "model_report.json" if side == "long" else f"model_report_{side}.json"
-    (STORAGE / name).write_text(json.dumps(report, indent=2, default=str))
-    _cache.pop(side, None)
+    report["feature_importance"] = sorted(zip(feats, final.feature_importances_.tolist(), strict=False),
+                                          key=lambda x: -x[1])
+    joblib.dump({"model": final, "features": feats, "report": report}, model_path("long"))
+    (STORAGE / "model_report.json").write_text(json.dumps(report, indent=2, default=str))
+    _cache.pop("long", None)
     return report
 
 
 def train_all() -> dict:
-    """Retrain the live (long) model on fresh data."""
-    return {"long": train(side="long")}
+    """Monthly retrain: refresh the point-in-time data, then retrain the live model."""
+    return {"long": train(refresh=True)}
 
 
 _cache = {}
@@ -192,13 +203,11 @@ def load_model(side: str = "long"):
 
 
 if __name__ == "__main__":
+    import sys
     import warnings
 
     warnings.filterwarnings("ignore")
     logging.basicConfig(level=logging.INFO)
-    for side, r in train_all().items():
-        print(side, "chosen:", r["feature_set"])
-        for k, v in r["comparison"].items():
-            print("  ", k, "auc", v["auc"], "quality", v["quality"])
-            for row in v["by_threshold"]:
-                print("     ", row)
+    r = train(refresh="--refresh" in sys.argv)
+    print("trained on:", r["training_source"], "| rows", r["train_rows"], "| holdout AUC", r["auc"])
+    print("holdout portfolio:", {k: r["portfolio"][k] for k in ("total_return", "max_drawdown", "win_rate", "trades")})
