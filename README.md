@@ -30,7 +30,7 @@ researches each one with LLM agents, and tracks every call against real market d
 | | Feature | What it does |
 |---|---|---|
 | 🧮 | **ML screener** | A LightGBM model ranks ~480 liquid NSE stocks every day by the probability that a long swing trade hits its target before its stop within 20 sessions. |
-| 📏 | **Rule-based rubric** | Setup structure, momentum, volume and risk-reward scored on fixed rules that were validated on 22 years of data. |
+| 🌡️ | **Market breadth gate** | Buy calls only when more than half of the market's stocks are above their 50-day average; this halved the worst drawdown in the honest backtest. |
 | 🤖 | **Research agent** | For the top candidates, an LLM agent (AWS Bedrock) reads news, filings, fundamentals and official NSE event dates, and can veto a pick for red flags, negative news or results inside the holding window. |
 | 🟢 | **Confidence tiers** | Final score = ML rank + a rule-based rubric, both validated on 22 years of walk-forward data. Green requires every gate: market regime, rubric and an AI agent veto check. |
 | 🧭 | **Market context** | Nifty regime (bullish / neutral / bearish), FII/DII net flows and a sector **money-flow heatmap**. |
@@ -87,18 +87,20 @@ flowchart LR
 ```
 
 ### 1. The trade definition
-Every signal is a long **triple-barrier** trade sized by volatility (ATR):
+Every signal is a long **triple-barrier** trade sized by volatility (ATR), modelled the way it can really be traded:
 
 | | Long |
 |---|---|
-| Entry | Close of the signal day |
+| Signal | After the close |
+| Entry | **Next day's open** |
 | Target | Entry **+ 3.5 × ATR** |
 | Stop-loss | Entry **− 2.5 × ATR** |
+| Gaps | A gap through a level fills at that day's open (a gap below the stop loses more than the stop) |
 | Time limit | 20 trading days |
+| Costs | 0.2% brokerage and taxes + 0.1% slippage per round trip |
 
-This 1.4 : 1 reward-to-risk setting was chosen by the 22-year research below: it kept win rate above 50% with the best
-profit factor while holding trades for ~13 sessions on average (a third run the full 20 days). The ML label is simply
-*"did the target hit before the stop within 20 days?"*. When both are touched on the same day, the stop is assumed to hit first.
+The ML label is *"bought at the next open, did the target hit before the stop within 20 days?"*. When both levels are
+touched in one bar, the stop is assumed to hit first. Trades last ~13 sessions on average; a third run the full 20 days.
 
 ### 2. ML screener
 - **Features:** RSI, MACD, ADX, ATR %, distance from EMA 20/50/200 and 52-week high/low, volume surge,
@@ -106,20 +108,14 @@ profit factor while holding trades for ~13 sessions on average (a third run the 
   **sector momentum** across the whole universe each day.
 - **Training:** pooled data from all Nifty 500 stocks (~450k rows), time-based split with an embargo so the test year
   never overlaps training labels; the last 12 months are held out as an out-of-sample check.
-- **What was tried and dropped:** delivery %, futures OI change and options PCR did **not** improve the out-of-sample
-  backtest, and short setups lost money in every tested setting, so neither is part of the live app.
+- **Tried and dropped** because they did not improve the honest backtest: delivery %, futures OI and options PCR as
+  features, short setups, a LightGBM + logistic-regression ensemble, isotonic probability calibration (it did not hold
+  up in later years), and a rule-based price-structure rubric as a gate (still shown on each pick for context).
 
-### 3. Rule-based rubric
-Four components, computed from price and volume data with fixed rules, so they can be (and were) backtested over 22 years:
-
-| Component | Max | Judges |
-|---|---:|---|
-| Setup structure | 20 | Structure that fits the setup type (trend, pullback, oversold bounce), not just "above EMAs" |
-| Momentum | 15 | Cross-sectional rank of relative strength and 20-day return |
-| Volume | 15 | Volume surge and up-day participation |
-| Risk–reward | 10 | Stop sits below the 20-day swing low |
-
-The total is rescaled to 0–100; a score of **70 or more** is one of the gates for the top tier.
+### 3. Market breadth gate
+Each scan measures the share of liquid Nifty 500 stocks trading above their 50-day average. Buy calls are only made when
+it is above **50%**. In the survivorship-free test this beat the classic "Nifty above its 200-day average" filter on both
+profit factor and drawdown (worst drawdown −25% vs −48%).
 
 ### 4. Research agent (veto only)
 200 past signals were shown to the LLM with the name, sector and dates hidden and prices rebased to 100. Its chart
@@ -129,71 +125,78 @@ price model cannot see: news, filings and event dates. It holds a pick back when
 results inside the holding window. Official NSE event dates always override its own guess, and it runs at temperature 0
 so the same facts give the same verdict.
 
-### 5. Final score and tiers
-```
-score = 0.6 × ML percentile + 0.4 × rule-based rubric
-        − 8 when trading against the market regime
-        − 4 when results fall inside the holding window
-```
-| Tier | Rule | Backed by (22-year walk-forward) |
+### 5. Decision rule
+| Call | Rule | Backed by (22-year test, delisted stocks included) |
 |---|---|---|
-| 🟢 **Top tier** | score ≥ 85, Nifty above its 200-day average, rubric ≥ 70, agent clear | 54.8% profitable, profit factor 1.61, worst drawdown −18% |
-| 🟩 **Good** | score ≥ 72, Nifty above its 200-day average, agent clear | 53.8% profitable, profit factor 1.52, worst drawdown −31% |
-| ⚪ **Watch** | everything else | – |
+| 🟢 **Buy** | top 2% of the daily ML ranking, market breadth > 50%, agent clear | 50.8% profitable, profit factor 1.28, worst drawdown −25% |
+| ⚪ **Watch** | anything that fails a gate | – |
 | 🔴 **Avoid** | confirmed red flag | – |
 
-Every card shows the numbers behind its tier, so a label never promises more than history delivered.
+Every Buy card shows these numbers, so the label never promises more than history delivered. The edge is real but modest:
+expect roughly half of the trades to lose, with winners slightly larger than losers on average.
 
 ---
 
 ## 📊 Backtest results
 
-### 22-year walk-forward (2004 → 2026)
-Prices from 1996 for 475 stocks. Every year is traded by a model trained only on earlier years, with a 10-slot portfolio and
-0.2% cost per trade. Filter thresholds were chosen on data before 2016; 2016–2026 is the out-of-sample check.
+### Survivorship-free 22-year walk-forward (2005 → 2026)
+Testing only today's Nifty 500 hides every company that later collapsed or was delisted. This test rebuilds the
+universe month by month from NSE's daily bhavcopies (**2,165 stocks** that were in the top 500 by traded value at the time,
+including later-delisted ones), adjusts prices for splits and bonuses, and retrains the model every year on earlier data
+only. Entries are at the next day's open with gap fills, 0.3% cost per trade, 10-slot portfolio. Rules were chosen on data
+before 2016; 2016–2026 is the out-of-sample check.
 
-| Strategy (long, target 3.5 / stop 2.5 ATR) | Trades | Win rate | Profit factor | Avg trade | Max drawdown | Win rate 2016+ |
-|---|---:|---:|---:|---:|---:|---:|
-| Random pick, same universe | 3,774 | 51.3% | 1.29 | +1.1% | −77% | 50.9% |
-| ML top 2% | 4,253 | 54.2% | 1.53 | +1.7% | −64% | 54.0% |
-| **ML + regime + rubric (live setting)** | **1,620** | **54.8%** | **1.61** | **+1.7%** | **−18%** | **53.0%** |
+| Strategy | Trades | Profitable | Profit factor | Worst drawdown | 2016+ profit factor |
+|---|---:|---:|---:|---:|---:|
+| Random pick, same universe | 3,840 | 46.4% | 1.03 | −78% | 1.10 |
+| ML top 2% | 4,333 | 49.8% | 1.20 | −66% | 1.24 |
+| ML top 2% + Nifty > 200-day average | 2,747 | 49.7% | 1.23 | −48% | 1.23 |
+| **ML top 2% + breadth > 50% (live rule)** | **2,516** | **50.8%** | **1.28** | **−25%** | **1.27** |
+
+How much the earlier, rosier numbers were inflated:
+
+| Same ML strategy | Profit factor |
+|---|---:|
+| Today's Nifty 500, close entry, 0.2% cost (old test) | 1.52 |
+| Today's Nifty 500, next-open entry, gaps, 0.3% cost | 1.48 |
+| **Point-in-time universe incl. delisted, next-open, gaps, 0.3% cost** | **1.20** |
 
 Other findings:
 - **Win rate vs. profit:** smaller targets push win rate to 62–76%, but the profit factor drops and trades last only 6–9 days.
-  The live setting is the best balance of win rate above 50%, profit factor and a 15–20 day holding window.
-- **Market regime filter** (long only when Nifty is above its 200-day average) cut the worst drawdown from −64% to −18%.
-- **Short setups** lost money in all 20 target/stop settings over 22 years (profit factor 0.73–0.84), with or without
-  filters, which is why the live app is long-only.
+- **Short setups** lost money in all 20 target/stop settings, so the app is long-only.
+- **Ensemble** (LightGBM + logistic regression): no improvement out of sample. **Calibration** fitted before 2016 was
+  further off after 2016 (top decile: 29% predicted vs 34% actual), so the app shows observed hit rates instead.
 
 Reproduce with:
 ```bash
-python -m app.research.history                 # download max price history (~5 min)
-python -m app.research.experiment build        # features + outcomes for 20 settings x 2 sides
-python -m app.research.experiment walk         # yearly walk-forward models
-python -m app.research.analyze long            # baseline vs filters, tuned before 2016, checked after
-python -m app.research.analyze export          # results shown in the Backtest tab
-python -m app.research.llm_backtest long 3.5 2.5   # anonymised LLM test (~200 Bedrock calls)
+python -m app.research.pit download     # NSE daily bhavcopies since 2002 (~6,500 files, resumable)
+python -m app.research.pit build        # split/bonus-adjusted prices + monthly point-in-time top-500 universe
+python -m app.research.v2 build pit     # features and realistic outcomes
+python -m app.research.v2 walk pit      # yearly walk-forward (LightGBM and logistic regression)
+python -m app.research.v2 report pit    # every variant above, plus calibration and AUC
+python -m app.research.v2 export pit    # numbers shown in the dashboard's Backtest tab
 ```
+The same pipeline runs on today's Nifty 500 with `yahoo` instead of `pit` (after `python -m app.research.history`).
 
 ### Latest model, last 12 months
-Out-of-sample period **Oct 2025 → Sep 2026** with the live long setting (target 3.5 / stop 2.5 ATR), model trained on the
-previous five years. Costs of 0.2% per round trip included.
+Out-of-sample period **Oct 2025 → Oct 2026**, model trained on the previous five years, next-open entries with gap fills,
+0.3% cost per trade, ML top 2% only (no breadth or agent gate).
 
 | Long model | Value |
 |---|---:|
-| Target-hit rate, random stock | 23.8% |
-| Target-hit rate, top ~1% ML signals | **33.6%** |
-| Portfolio return (10 slots, top 2% signals) | **+14.3%** |
-| Nifty 50, same period | −9.7% |
-| Profitable trades after costs | 47.8% |
-| Max drawdown | −12.7% |
+| Target-hit rate, random stock | 23.0% |
+| Target-hit rate, top ~1% ML signals | **30.9%** |
+| Portfolio return (10 slots, top 2% signals) | **+9.2%** |
+| Nifty 50, same period | −10.6% |
+| Profitable trades after costs | 46.2% |
+| Max drawdown | −12.8% |
 
 **Win rate** in this README means trades that closed in profit after costs (at the target, or above entry at the 20-day exit).
 **Target-hit rate** counts only trades that reached the full target before the stop.
 
 > [!NOTE]
-> Every row above uses today's Nifty 500 list, so stocks that were delisted are missing (survivorship bias). That flatters
-> absolute returns for every strategy, including the random baseline; compare strategies against each other.
+> The 12-month check uses today's Nifty 500, so it is flattered by survivorship bias; the 22-year point-in-time test
+> above is the number to trust.
 
 ---
 
@@ -260,8 +263,8 @@ environment variables, never from this repo.
 | `BEDROCK_MODEL_ID` | `moonshotai.kimi-k2.5` | Any Bedrock model that supports the Converse API with tool use |
 | `HOLD_MIN_DAYS` / `HOLD_MAX_DAYS` | `15` / `20` | Swing holding window |
 | `TARGET_ATR` / `STOP_ATR` | `3.5` / `2.5` | Barrier distances in ATR multiples |
-| `REGIME_FILTER` | `1` | Long picks can be green only when Nifty is above its 200-day average |
-| `RUBRIC_MIN` | `70` | Rule-based rubric score required for green |
+| `ML_TOP_PCT` | `98` | Minimum ML percentile for a Buy (top 2%) |
+| `BREADTH_MIN` | `0.5` | Minimum share of stocks above their 50-day average for any Buy |
 | `AGENT_TOP_N` | `15` | Default number of stocks sent to the agents |
 
 In-app **Settings** (stored in the local database): capital, risk per trade %, Telegram bot token and chat ID, alerts on/off.
@@ -411,7 +414,9 @@ lock, recovery after restart and the tier rules. GitHub Actions runs all of it p
 - The statistical edge is modest; expect many losing trades even when the system works as designed.
 - The agent layer is evaluated only going forward (outcome tracking + paper trading), not in the historical backtest.
 - Free data feeds can lag, change format or rate-limit. NSE may block cloud/datacenter IPs.
-- Survivorship bias: the universe is today's index membership.
+- The live model is trained on today's Nifty 500 (survivors); the point-in-time test shows the realistic edge is about
+  a third smaller than that training data suggests.
+- The agent veto is measured live (Backtest tab → Agent veto check); judge it only after 100+ closed trades.
 - The LLM's news and fundamentals judgement cannot be backtested (no as-of-date news archive); only its chart reading was
   tested, and it showed no edge. Treat the agent as a risk filter, not a source of alpha.
 
