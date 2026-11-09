@@ -1,6 +1,8 @@
 import json
 import logging
 import re
+import threading
+import time
 import warnings
 from contextlib import asynccontextmanager
 from typing import Literal
@@ -227,9 +229,31 @@ def model_report():
     return r
 
 
+_outcomes = {"ts": 0.0, "lock": threading.Lock()}
+OUTCOME_REFRESH_SECONDS = 30 * 60
+
+
+def _refresh_outcomes_in_background() -> None:
+    """Outcomes need price data for every open pick (slow), so a request never waits for them:
+    it gets the stored numbers and, if they are older than 30 minutes, a refresh starts in the background."""
+    if time.time() - _outcomes["ts"] < OUTCOME_REFRESH_SECONDS or not _outcomes["lock"].acquire(blocking=False):
+        return
+
+    def run():
+        try:
+            update_outcomes()
+            _outcomes["ts"] = time.time()
+        except Exception:
+            log.exception("outcome refresh failed")
+        finally:
+            _outcomes["lock"].release()
+
+    threading.Thread(target=run, daemon=True, name="outcomes").start()
+
+
 @app.get("/api/performance")
 def performance():
-    update_outcomes()
+    _refresh_outcomes_in_background()
     return db.performance(SCORING_VERSION)
 
 
