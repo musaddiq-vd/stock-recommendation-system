@@ -6,34 +6,19 @@ import feedparser
 import yfinance as yf
 
 from ..data.events import get_corporate_events
-from ..data.prices import load, yf_ticker
-from ..data import nse
-from ..features import add_nse, compute, trade_levels
-from ..data.prices import benchmark
+from ..data.prices import benchmark, load, yf_ticker
+from ..features import compute, trade_levels
 
 log = logging.getLogger(__name__)
 
 
-def get_technicals(symbol: str, side: str = "long") -> dict:
+def get_technicals(symbol: str) -> dict:
     df = load(symbol)
     if df is None:
         return {"error": f"No price data for {symbol}"}
-    f = add_nse(compute(df, benchmark()), nse.for_symbol(symbol))
+    f = compute(df, benchmark())
     r = f.iloc[-1]
     closes = f.close.tail(30)
-
-    def _n(v, mult=1.0, nd=2):
-        return None if v != v else round(float(v) * mult, nd)  # NaN -> None
-
-    nse_ctx = {
-        "delivery_pct_today": _n(r.deliv_per, nd=1),
-        "delivery_vs_20d_avg": _n(r.deliv_rel20),
-        "futures_oi_change_5d_pct": _n(r.fut_oi_chg5, 100, 1),
-        "oi_buildup_hint": None if r.oi_buildup != r.oi_buildup else (
-            "long buildup / short covering" if r.oi_buildup > 0.02 else
-            "short buildup / long unwinding" if r.oi_buildup < -0.02 else "neutral"),
-        "options_pcr_oi": _n(r.pcr),
-    }
     return {
         "symbol": symbol, "date": str(f.index[-1].date()), "close": round(float(r.close), 2),
         "rsi14": round(float(r.rsi14), 1), "adx14": round(float(r.adx14), 1),
@@ -42,9 +27,8 @@ def get_technicals(symbol: str, side: str = "long") -> dict:
         "return_20d_pct": round(float(r.ret_20) * 100, 1), "return_60d_pct": round(float(r.ret_60) * 100, 1),
         "rel_strength_vs_nifty_60d_pct": round(float(r.rs_60) * 100, 1),
         "volume_surge_5d_vs_50d": round(float(r.vol_surge), 2), "atr_pct": round(float(r.atr_pct) * 100, 2),
-        "nse_delivery_and_fo": {k: v for k, v in nse_ctx.items() if v is not None},
         "last_30_closes": [round(float(x), 1) for x in closes],
-        "trade_levels": trade_levels(r, "short" if side == "short" else "long"),
+        "trade_levels": trade_levels(r),
     }
 
 
@@ -100,10 +84,8 @@ def get_news(query: str, max_results: int = 10) -> list[dict]:
 
 
 SPECS = [
-    {"name": "get_technicals", "description": "Latest technical indicators, recent closes and ATR-based swing trade levels for an NSE symbol (e.g. RELIANCE). side='short' gives short-sell levels.",
-     "schema": {"type": "object", "properties": {"symbol": {"type": "string"},
-                                                 "side": {"type": "string", "enum": ["long", "short"]}},
-                "required": ["symbol"]}},
+    {"name": "get_technicals", "description": "Latest technical indicators, recent closes and ATR-based swing trade levels for an NSE symbol (e.g. RELIANCE).",
+     "schema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_fundamentals", "description": "Valuation, growth, profitability, analyst view and next earnings date for an NSE symbol.",
      "schema": {"type": "object", "properties": {"symbol": {"type": "string"}}, "required": ["symbol"]}},
     {"name": "get_news", "description": "Recent (30 days) Indian news headlines for a company or topic.",
@@ -115,8 +97,3 @@ SPECS = [
 ]
 HANDLERS = {"get_technicals": get_technicals, "get_fundamentals": get_fundamentals,
             "get_news": get_news, "web_search": web_search, "get_corporate_events": get_corporate_events}
-TECH_ONLY = {"get_technicals", "get_fundamentals", "get_corporate_events"}
-
-
-def specs_for(mode: str) -> list[dict]:
-    return SPECS if mode == "news" else [s for s in SPECS if s["name"] in TECH_ONLY]

@@ -1,40 +1,61 @@
-import numpy as np
 import pandas as pd
 
-from app.features import add_nse, compute
+from app.agents import orchestrator
 from app.paper import check_bar
-from tests.test_features import _df
 
 
-def _nse(idx, seed=1):
-    rng = np.random.default_rng(seed)
-    n = len(idx)
-    return pd.DataFrame({
-        "deliv_per": rng.uniform(20, 70, n), "deliv_qty": rng.integers(1e5, 1e6, n).astype(float),
-        "fut_oi": rng.integers(1e6, 2e6, n).astype(float), "call_oi": rng.integers(1e5, 1e6, n).astype(float),
-        "put_oi": rng.integers(1e5, 1e6, n).astype(float),
-    }, index=idx)
+def test_check_bar_long():
+    t = {"side": "long", "target": 110, "stop_loss": 95}
+    assert check_bar(t, 111, 100) == ("target", 110)
+    assert check_bar(t, 111, 94) == ("stop", 95)  # both touched: stop wins
+    assert check_bar(t, 105, 99) is None
 
 
-def test_nse_features_have_no_lookahead():
-    df = _df()
-    nse = _nse(df.index)
-    full = add_nse(compute(df), nse)
-    cut = add_nse(compute(df.iloc[:300]), nse.iloc[:300])
-    cols = ["deliv_rel20", "deliv_qty_surge", "fut_oi_chg5", "oi_buildup", "pcr", "pcr_chg5"]
-    pd.testing.assert_frame_equal(full[cols].iloc[:300], cut[cols])
+def _bars(rows, start="2026-10-01"):
+    idx = pd.bdate_range(start, periods=len(rows))
+    return pd.DataFrame(rows, columns=["open", "high", "low", "close", "volume"], index=idx)
 
 
-def test_missing_nse_is_nan():
-    f = add_nse(compute(_df()), None)
-    assert f.deliv_per.isna().all() and f.pcr.isna().all()
+PICK = {"as_of": "2026-09-30", "entry": 100.0, "target": 110.0, "stop_loss": 95.0}
 
 
-def test_check_bar_long_and_short():
-    long_t = {"side": "long", "target": 110, "stop_loss": 95}
-    short_t = {"side": "short", "target": 90, "stop_loss": 105}
-    assert check_bar(long_t, 111, 100) == ("target", 110)
-    assert check_bar(long_t, 111, 94) == ("stop", 95)  # both touched: stop wins
-    assert check_bar(long_t, 105, 99) is None
-    assert check_bar(short_t, 101, 89) == ("target", 90)
-    assert check_bar(short_t, 106, 89) == ("stop", 105)
+def test_evaluate_target_stop_timeout_open():
+    hit = _bars([[100, 104, 99, 103, 1], [103, 111, 102, 110, 1]])
+    assert orchestrator.evaluate(PICK, hit, None)[:1] == ("target",)
+    stop = _bars([[100, 101, 94, 96, 1]])
+    out, ret, days = orchestrator.evaluate(PICK, stop, None)
+    assert out == "stop" and round(ret, 3) == -0.05 and days == 1
+    flat = _bars([[100, 102, 98, 101, 1]] * 20)
+    out, ret, days = orchestrator.evaluate(PICK, flat, None)
+    assert out == "timeout" and round(ret, 3) == 0.01 and days == 20
+    out, ret, _ = orchestrator.evaluate(PICK, _bars([[100, 102, 98, 101, 1]] * 3), None)
+    assert out == "open" and round(ret, 3) == 0.01
+
+
+def test_evaluate_ignores_bars_before_recommendation():
+    # a bar on the recommendation day itself must not count
+    bars = _bars([[100, 120, 99, 100, 1], [100, 101, 99, 100, 1]], start="2026-09-30")
+    assert orchestrator.evaluate(PICK, bars, None)[0] == "open"
+
+
+def test_evaluate_uses_live_bar_for_today():
+    bars = _bars([[100, 102, 98, 101, 1]])
+    quote = {"date": "2026-10-02", "high": 112, "low": 100}
+    assert orchestrator.evaluate(PICK, bars, quote)[0] == "target"
+
+
+def test_judge_gates_and_veto(monkeypatch):
+    monkeypatch.setattr(orchestrator, "window_event", lambda s: None)
+    row = type("R", (), {"rubric": 80.0, "symbol": "TCS"})()
+    bull = {"regime": "bullish", "above_ema200": True}
+    clear = {"news_sentiment": "positive", "red_flags": [], "event_in_window": False, "parse_error": False}
+    j = orchestrator.judge(row, bull, dict(clear), 99)
+    assert j["tier"] == "strong" and all(j["gates"].values())
+    # negative news or a failed agent run never passes the agent gate
+    assert orchestrator.judge(row, bull, {**clear, "news_sentiment": "negative"}, 99)["tier"] == "watch"
+    assert orchestrator.judge(row, bull, {**clear, "parse_error": True}, 99)["tier"] == "watch"
+    assert orchestrator.judge(row, bull, {**clear, "red_flags": ["SEBI order"]}, 99)["tier"] == "avoid"
+    # official results inside the window override the agent
+    monkeypatch.setattr(orchestrator, "window_event", lambda s: {"purpose": "Financial Results", "date": "2026-11-12"})
+    j = orchestrator.judge(row, bull, dict(clear), 99)
+    assert j["gates"]["agent"] is False and j["tier"] == "watch"

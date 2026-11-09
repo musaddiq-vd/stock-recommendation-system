@@ -89,7 +89,9 @@ def export(side: str = "long", target: float = 3.5, stop: float = 2.5, rubric_mi
     rnd = rnd[rnd.groupby("date").prob.rank(pct=True) >= 0.98]
     top = base[base.pct >= 0.98]
     chosen = top[top.mkt_above_200 & (top.proxy >= rubric_min)]
-    variants = {"Random pick (same universe)": rnd, "ML top 2%": top, "ML + regime + rubric (live setting)": chosen}
+    variants = {"Random pick (same universe)": rnd, "ML top 2%": top,
+                "ML + regime (Good tier)": top[top.mkt_above_200],
+                "ML + regime + rubric (live setting)": chosen}
     out = {"side": side, "target_atr": target, "stop_atr": stop, "rubric_min": rubric_min, "split": SPLIT,
            "from": str(base.date.min().date()), "to": str(base.date.max().date()), "variants": []}
     for name, sig in variants.items():

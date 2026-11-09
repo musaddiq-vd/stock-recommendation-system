@@ -30,8 +30,6 @@ AGENT_TOP_N = int(os.getenv("AGENT_TOP_N", 15))
 # Gates validated on 22 years of walk-forward data (see app/research)
 REGIME_FILTER = os.getenv("REGIME_FILTER", "1") == "1"   # long "strong" picks only when Nifty > 200 EMA
 RUBRIC_MIN = float(os.getenv("RUBRIC_MIN", 70))            # rule-based rubric score needed for "strong"
-# Short setups lost money in every tested configuration over 22 years, so they are off by default
-SHORTS_ENABLED = os.getenv("SHORTS_ENABLED", "0") == "1"
 
 BENCHMARK = "^NSEI"
 
@@ -40,3 +38,6 @@ ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://local
 # The scheduler runs inside the API process: keep exactly one API worker, or set this to 0 on extra workers
 RUN_SCHEDULER = os.getenv("RUN_SCHEDULER", "1") == "1"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# Bump when tiers or scoring rules change, so the live track record never mixes different rule sets
+SCORING_VERSION = "3"

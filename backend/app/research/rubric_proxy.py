@@ -17,8 +17,16 @@ def setup_type(d: pd.DataFrame, side: str = "long") -> pd.Series:
         ["trend", "pullback", "bounce"], "reversal"), index=d.index)
 
 
+RUBRIC_MAX = {"structure": 20, "momentum": 15, "volume": 15, "risk_reward": 10}
+
+
 def proxy_score(d: pd.DataFrame, side: str, stop_atr: float) -> pd.Series:
-    """0-100 score from 4 components weighted like the agent rubric (20 / 15 / 15 / 10 → rescaled)."""
+    """0-100 score: the four components below, rescaled from their 60-point total."""
+    return proxy_components(d, side, stop_atr).sum(axis=1) / sum(RUBRIC_MAX.values()) * 100
+
+
+def proxy_components(d: pd.DataFrame, side: str, stop_atr: float) -> pd.DataFrame:
+    """Points per component (structure 0-20, momentum 0-15, volume 0-15, risk_reward 0-10)."""
     st = setup_type(d, side)
     sgn = 1 if side == "long" else -1
     # setup structure (0-1), judged for the setup type
@@ -40,4 +48,9 @@ def proxy_score(d: pd.DataFrame, side: str, stop_atr: float) -> pd.Series:
     # risk-reward: stop sits beyond the 20-day swing low (high for shorts is approximated by the stop distance)
     stop = d.close - sgn * stop_atr * d.atr
     rr = ((stop < d.low_20) if side == "long" else (d.atr / d.close < 0.04)).astype(float)
-    return (20 * structure + 15 * mom + 15 * vol + 10 * rr) / 60 * 100
+    return pd.DataFrame({
+        "structure": 20 * pd.Series(structure, index=d.index).astype(float),
+        "momentum": 15 * mom.astype(float),
+        "volume": 15 * vol.astype(float),
+        "risk_reward": 10 * rr.astype(float),
+    }, index=d.index)
