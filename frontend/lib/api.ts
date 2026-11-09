@@ -47,7 +47,7 @@ export interface Market {
   regime: "bullish" | "neutral" | "bearish";
   date: string;
   flows?: { date?: string; fii?: number; dii?: number; fii_5d?: number; dii_5d?: number; days_tracked?: number };
-  breadth50?: number;
+  breadth200?: number;
 }
 
 export interface Scan {

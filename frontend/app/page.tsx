@@ -200,7 +200,10 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-zinc-400">
                 Scan #{scan.id} · {scan.universe}{scan.sector ? ` · ${scan.sector}` : ""} · {scan.created_at.replace("T", " ")}
-                {scan.market?.breadth50 != null && <> · breadth {Math.round(scan.market.breadth50 * 100)}% {scan.market.breadth50 > 0.5 ? "✓" : "(below 50%: no Buy calls)"}</>}
+                {scan.market?.breadth200 != null && (
+                  <> · Nifty {scan.market.above_ema200 ? "above" : "below"} 200-day avg · breadth {Math.round(scan.market.breadth200 * 100)}%{" "}
+                    {scan.market.above_ema200 && scan.market.breadth200 > 0.5 ? "✓ market gate open" : "(market gate closed: no Buy calls)"}</>
+                )}
               </span>
               <span className="flex-1" />
               {(["all", "strong", "watch", "avoid"] as const).map((t) => (
@@ -239,7 +242,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
 
           <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-400">
             <div className="flex flex-wrap gap-3">
-              <Legend cls="bg-emerald-500" t="Buy: top 2% ML rank, market breadth > 50%, agent clear" />
+              <Legend cls="bg-emerald-500" t="Buy: top 2% ML rank, Nifty and > 50% of stocks above their 200-day averages, agent clear" />
               <Legend cls="bg-zinc-700" t="Watch" />
               <Legend cls="bg-red-800" t="Avoid: confirmed red flag" />
             </div>

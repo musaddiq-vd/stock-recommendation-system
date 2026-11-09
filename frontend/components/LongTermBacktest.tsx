@@ -52,7 +52,8 @@ export default function LongTermBacktest() {
         <div className="text-sm font-semibold text-white">22-year walk-forward ({r.from.slice(0, 4)} → {r.to.slice(0, 4)})</div>
         <p className="text-xs text-zinc-400 mt-1">
           Every year is traded by a model trained only on earlier years. Live setting: target {r.target_atr}× ATR, stop {r.stop_atr}× ATR,
-          top 2% of the ML ranking, only when more than {Math.round(r.breadth_min * 100)}% of stocks are above their 50-day average.
+          top 2% of the ML ranking, only when Nifty and more than {Math.round(r.breadth_min * 100)}% of stocks are above their 200-day
+          averages (chosen on pre-2016 data among six market filters).
           Bought at the next day&apos;s open with gap fills, {((r.cost ?? 0.003) * 100).toFixed(1)}% cost per trade.
           {r.survivorship_free && <> Universe: the {r.symbols} stocks that were in the top 500 at the time, including later-delisted ones.</>}
           {" "}Rules were chosen on data

@@ -87,7 +87,7 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 text-sm">
           <Stat k="Final score" v={pick.score.toFixed(0)} />
-          <Stat k="Market breadth gate" v={pick.gates?.breadth === undefined ? "–" : pick.gates.breadth ? "pass" : "fail"} />
+          <Stat k="Market gate" v={pick.gates?.market === undefined ? "–" : pick.gates.market ? "open" : "closed"} />
           <Stat k="ML rank" v={`Top ${Math.max(1, 100 - pick.ml_percentile)}%`} />
           <Stat k="Target-hit rate*" v={`${(pick.hist_win_rate * 100).toFixed(0)}%`} />
         </div>
