@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import ChatPanel from "@/components/ChatPanel";
+import ChatDock from "@/components/ChatDock";
 import PaperPanel from "@/components/PaperPanel";
 import BacktestPanel from "@/components/BacktestPanel";
 import SectorHeatmap from "@/components/SectorHeatmap";
@@ -46,7 +46,6 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
   const [open, setOpen] = useState<Pick | null>(null);
   const [tierFilter, setTierFilter] = useState<Tier | "all">("all");
   const [tierStats, setTierStats] = useState<TierStats>({});
-  const [chatOpen, setChatOpen] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [tab, setTab] = useState<"picks" | "sectors" | "backtest" | "paper">("picks");
@@ -259,15 +258,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
         )}
       </main>
 
-      <aside className={`${chatOpen ? "flex fixed inset-0 z-30" : "hidden"} lg:static lg:flex w-full lg:w-[400px] lg:shrink-0 min-w-0 overflow-hidden border-l border-zinc-800 bg-zinc-950`}>
-        <ChatPanel />
-      </aside>
-      <button
-        onClick={() => setChatOpen((o) => !o)}
-        className={`lg:hidden fixed right-4 z-30 rounded-full bg-emerald-600 text-sm font-semibold text-white shadow-lg ${chatOpen ? "top-3 px-3 py-1.5" : "bottom-4 px-4 py-3"}`}
-      >
-        {chatOpen ? "✕ Close" : "💬 Chat"}
-      </button>
+      <ChatDock />
 
       {open && (
         <StockDrawer pick={open} onClose={() => setOpen(null)} settings={settings} scanId={scan?.id}
