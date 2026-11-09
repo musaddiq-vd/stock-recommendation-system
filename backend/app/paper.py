@@ -108,8 +108,7 @@ class TradeRejected(ValueError):
     pass
 
 
-def open_trade(symbol: str, side: str, qty: int, lots: int | None, target: float, stop_loss: float,
-               scan_id: int | None = None) -> dict:
+def open_trade(symbol: str, qty: int, target: float, stop_loss: float, scan_id: int | None = None) -> dict:
     """Open at the current price, not the scan's close: a trade opened days later must not inherit moves
     that already happened. Rejected if the price has already passed the target or the stop."""
     daily = load_many([symbol]).get(symbol)
@@ -119,10 +118,8 @@ def open_trade(symbol: str, side: str, qty: int, lots: int | None, target: float
     q = live_quotes([symbol]).get(symbol)
     if q and q["date"] >= on:
         price, on = q["last"], q["date"]
-    if side == "long" and not (stop_loss < price < target):
+    if not (stop_loss < price < target):
         raise TradeRejected(f"Price ₹{price:.2f} is already outside stop ₹{stop_loss} / target ₹{target}")
-    if side == "short" and not (target < price < stop_loss):
-        raise TradeRejected(f"Price ₹{price:.2f} is already outside target ₹{target} / stop ₹{stop_loss}")
-    tid = db.add_paper({"symbol": symbol, "side": side, "qty": qty, "lots": lots, "entry": round(price, 2),
+    tid = db.add_paper({"symbol": symbol, "side": "long", "qty": qty, "lots": None, "entry": round(price, 2),
                         "target": target, "stop_loss": stop_loss, "opened_on": on, "scan_id": scan_id})
     return {"id": tid, "entry": round(price, 2), "opened_on": on}

@@ -67,29 +67,3 @@ def symbols_for(index: str, sector: str | None = None) -> list[str]:
     if sector:
         df = df[df.sector.str.lower() == sector.lower()]
     return df.symbol.tolist()
-
-
-FO_URL = "https://nsearchives.nseindia.com/content/fo/fo_mktlots.csv"
-
-
-def get_fo_lots() -> dict[str, int]:
-    """Stocks with NSE futures (the only way to hold a short for 15-20 days) -> current lot size."""
-    path = UNIVERSE_DIR / "FO_LOTS.csv"
-    if not path.exists() or time.time() - path.stat().st_mtime > MAX_AGE:
-        try:
-            r = requests.get(FO_URL, headers=HEADERS, timeout=30)
-            r.raise_for_status()
-            path.write_text(r.text)
-        except Exception:
-            if not path.exists():
-                return {}
-    df = pd.read_csv(path)
-    df.columns = [c.strip() for c in df.columns]
-    lot_col = df.columns[2]
-    out = {}
-    for sym, lot in zip(df.SYMBOL, df[lot_col], strict=False):
-        try:
-            out[str(sym).strip()] = int(float(str(lot).strip()))
-        except (TypeError, ValueError):
-            pass
-    return out

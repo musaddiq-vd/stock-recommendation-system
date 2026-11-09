@@ -51,11 +51,9 @@ def find_chat_id(token: str) -> str | None:
 
 def fmt_pick(p: dict) -> str:
     L = p["levels"]
-    arrow = "🔻 SHORT" if p.get("side") == "short" else "🟢 BUY"
     tier = "🔥 HIGH PROBABILITY" if p["tier"] == "strong" else "✅ Good"
-    lot = f" · lot {p['lot_size']}" if p.get("lot_size") else ""
     summary = (p.get("research", {}).get("summary") or "")[:220]
-    return (f"<b>{arrow} {p['symbol']}</b> ({tier}, score {p['score']:.0f}){lot}\n"
+    return (f"<b>🟢 BUY {p['symbol']}</b> ({tier}, score {p['score']:.0f})\n"
             f"Entry ₹{L['entry']} → Target ₹{L['target']} · Stop ₹{L['stop_loss']} · hold {p['hold_days']}d\n"
             f"<i>{summary}</i>")
 

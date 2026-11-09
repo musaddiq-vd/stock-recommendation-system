@@ -14,34 +14,7 @@ RANK_SOURCES = ["ret_20", "ret_60", "rs_60", "dist_52w_high", "vol_surge", "atr_
 XS_FEATURES = [f"xr_{c}" for c in RANK_SOURCES] + ["sector_ret_20", "sector_rank"]
 MARKET_FEATURES = ["mkt_dist_ema200", "mkt_ret_20"]
 BASE_FEATURES = [c for c in FEATURES if c not in MARKET_FEATURES] + XS_FEATURES
-# NSE archive features: delivery % (all stocks) and F&O open interest / PCR (F&O stocks only, else NaN)
-NSE_FEATURES = ["deliv_per", "deliv_rel20", "deliv_qty_surge", "fut_oi_chg5", "oi_buildup", "pcr", "pcr_chg5",
-                "xr_deliv_rel20"]
-ALL_FEATURES = BASE_FEATURES + NSE_FEATURES
-
-
-def add_nse(f: pd.DataFrame, nse: pd.DataFrame | None) -> pd.DataFrame:
-    """Merge per-day NSE data (indexed by date) and derive features. Missing data stays NaN."""
-    cols = ["deliv_per", "deliv_rel20", "deliv_qty_surge", "fut_oi_chg5", "oi_buildup", "pcr", "pcr_chg5"]
-    if nse is None or nse.empty:
-        for c in cols:
-            f[c] = np.nan
-        return f
-    n = nse.reindex(f.index).ffill(limit=2)
-    f["deliv_per"] = n.deliv_per
-    f["deliv_rel20"] = n.deliv_per / n.deliv_per.rolling(20, min_periods=10).mean()
-    f["deliv_qty_surge"] = n.deliv_qty.rolling(5).mean() / n.deliv_qty.rolling(50, min_periods=20).mean()
-    if "fut_oi" in n:
-        oi = n.fut_oi.where(n.fut_oi > 0)
-        f["fut_oi_chg5"] = oi.pct_change(5, fill_method=None)
-        # + = long buildup (price up, OI up) / short covering; - = short buildup (price down, OI up)
-        f["oi_buildup"] = f.fut_oi_chg5 * np.sign(f.close.pct_change(5))
-        pcr = n.put_oi / n.call_oi.where(n.call_oi > 0)
-        f["pcr"] = pcr
-        f["pcr_chg5"] = pcr.diff(5)
-    else:
-        f["fut_oi_chg5"] = f["oi_buildup"] = f["pcr"] = f["pcr_chg5"] = np.nan
-    return f
+ALL_FEATURES = BASE_FEATURES
 
 
 def add_cross_sectional(data: "pd.DataFrame") -> "pd.DataFrame":
@@ -51,8 +24,6 @@ def add_cross_sectional(data: "pd.DataFrame") -> "pd.DataFrame":
         data[f"xr_{c}"] = g[c].rank(pct=True)
     data["sector_ret_20"] = data.groupby(["date", "sector"]).ret_20.transform("mean")
     data["sector_rank"] = data.groupby("date").sector_ret_20.rank(pct=True)
-    if "deliv_rel20" in data:
-        data["xr_deliv_rel20"] = data.groupby("date").deliv_rel20.rank(pct=True)
     return data
 
 

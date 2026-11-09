@@ -1,12 +1,11 @@
-"""NSE archive data: delivery % (equity bhavcopy), F&O open interest / PCR, FII-DII flows.
+"""NSE archive data: official daily OHLC (price fallback), delivery quantities (sector heatmap), FII-DII flows.
 
-Each trading day is cached as a small parquet so backfill can resume and daily updates are cheap.
+Each trading day is cached as a small parquet so daily updates are cheap.
 """
 import datetime as dt
 import io
 import logging
 import time
-import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import pandas as pd
@@ -16,14 +15,13 @@ from ..config import STORAGE
 
 log = logging.getLogger(__name__)
 NSE_DIR = STORAGE / "nse"
-DELIV_DIR, FO_DIR = NSE_DIR / "deliv", NSE_DIR / "fo"
-for d in (DELIV_DIR, FO_DIR):
-    d.mkdir(parents=True, exist_ok=True)
+DELIV_DIR = NSE_DIR / "deliv"
+DELIV_DIR.mkdir(parents=True, exist_ok=True)
+PANEL_DAYS = 120  # the heatmap needs ~50 sessions of delivery history
 FII_PATH = NSE_DIR / "fii_dii.csv"
 
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/130.0 Safari/537.36"}
-UDIFF_START = dt.date(2024, 7, 8)  # NSE switched F&O bhavcopy to the UDiFF format
 
 
 def _get(url: str, tries: int = 3) -> bytes | None:
@@ -83,42 +81,10 @@ def bhav_ohlc(day: dt.date) -> pd.DataFrame | None:
     return out
 
 
-def fetch_fo(day: dt.date) -> pd.DataFrame | None:
-    """Per stock: total futures OI, call OI and put OI across expiries."""
-    if day >= UDIFF_START:
-        url = f"https://nsearchives.nseindia.com/content/fo/BhavCopy_NSE_FO_0_0_0_{day:%Y%m%d}_F_0000.csv.zip"
-    else:
-        mon = day.strftime("%b").upper()
-        url = (f"https://nsearchives.nseindia.com/content/historical/DERIVATIVES/{day:%Y}/{mon}/"
-               f"fo{day:%d}{mon}{day:%Y}bhav.csv.zip")
-    raw = _get(url)
-    if not raw:
-        return None
-    with zipfile.ZipFile(io.BytesIO(raw)) as z:
-        df = pd.read_csv(z.open(z.namelist()[0]))
-    if "TckrSymb" in df.columns:  # UDiFF
-        df = pd.DataFrame({"inst": df.FinInstrmTp, "symbol": df.TckrSymb, "opt": df.OptnTp, "oi": df.OpnIntrst})
-        fut, opt = "STF", "STO"
-    else:
-        df = pd.DataFrame({"inst": df.INSTRUMENT, "symbol": df.SYMBOL, "opt": df.OPTION_TYP, "oi": df.OPEN_INT})
-        fut, opt = "FUTSTK", "OPTSTK"
-    df["symbol"] = df.symbol.astype(str).str.strip()
-    df["oi"] = pd.to_numeric(df.oi, errors="coerce").fillna(0)
-    f = df[df.inst == fut].groupby("symbol").oi.sum().rename("fut_oi")
-    o = df[df.inst == opt]
-    c = o[o.opt == "CE"].groupby("symbol").oi.sum().rename("call_oi")
-    p = o[o.opt == "PE"].groupby("symbol").oi.sum().rename("put_oi")
-    out = pd.concat([f, c, p], axis=1).reset_index().rename(columns={"index": "symbol"})
-    out["date"] = pd.Timestamp(day)
-    return out
-
-
 def _cache_day(day: dt.date) -> None:
-    for folder, fn in ((DELIV_DIR, fetch_delivery), (FO_DIR, fetch_fo)):
-        path = folder / f"{day:%Y%m%d}.parquet"
-        if path.exists():
-            continue
-        df = fn(day)
+    path = DELIV_DIR / f"{day:%Y%m%d}.parquet"
+    if not path.exists():
+        df = fetch_delivery(day)
         if df is not None and len(df):
             df.to_parquet(path)
 
@@ -131,9 +97,9 @@ def trading_days(years: float) -> list[dt.date]:
     return [d.date() for d in idx if d >= start]
 
 
-def backfill(years: float = 4, workers: int = 3) -> None:
-    days = [d for d in trading_days(years)
-            if not (DELIV_DIR / f"{d:%Y%m%d}.parquet").exists() or not (FO_DIR / f"{d:%Y%m%d}.parquet").exists()]
+def backfill(years: float = 0.35, workers: int = 3) -> None:
+    """Fetch recent delivery history (default ~4 months, enough for the heatmap's 50-session averages)."""
+    days = [d for d in trading_days(years) if not (DELIV_DIR / f"{d:%Y%m%d}.parquet").exists()]
     log.info("NSE backfill: %d days to fetch", len(days))
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for i, _ in enumerate(ex.map(_cache_day, days), 1):
@@ -152,17 +118,11 @@ _cache: dict = {}
 
 
 def nse_panel() -> pd.DataFrame:
-    """All cached days merged: index (symbol, date) → deliv_per, deliv_qty, fut_oi, call_oi, put_oi."""
+    """Recent cached days merged: index (symbol, date) → deliv_per, deliv_qty."""
     if "panel" not in _cache:
-        dl = [pd.read_parquet(p) for p in sorted(DELIV_DIR.glob("*.parquet"))]
-        fo = [pd.read_parquet(p) for p in sorted(FO_DIR.glob("*.parquet"))]
-        if not dl:
-            _cache["panel"] = pd.DataFrame()
-        else:
-            d = pd.concat(dl)
-            if fo:
-                d = d.merge(pd.concat(fo), on=["symbol", "date"], how="left")
-            _cache["panel"] = d.set_index(["symbol", "date"]).sort_index()
+        files = sorted(DELIV_DIR.glob("*.parquet"))[-PANEL_DAYS:]
+        dl = [pd.read_parquet(p) for p in files]
+        _cache["panel"] = pd.concat(dl).set_index(["symbol", "date"]).sort_index() if dl else pd.DataFrame()
     return _cache["panel"]
 
 
@@ -220,6 +180,6 @@ if __name__ == "__main__":
 
     warnings.filterwarnings("ignore")
     logging.basicConfig(level=logging.INFO)
-    backfill(float(sys.argv[1]) if len(sys.argv) > 1 else 4)
+    backfill(float(sys.argv[1]) if len(sys.argv) > 1 else 0.35)
     p = nse_panel()
     print("rows", len(p), "days", p.index.get_level_values(1).nunique())

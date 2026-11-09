@@ -10,8 +10,7 @@ from sklearn.metrics import roc_auc_score
 
 from ..config import HOLD_MAX_DAYS, STORAGE
 from ..data.prices import benchmark, load_many
-from ..data import nse
-from ..features import ALL_FEATURES, BASE_FEATURES, add_cross_sectional, add_nse, compute, label
+from ..features import BASE_FEATURES, add_cross_sectional, compute, label
 from ..universe import get_universe
 
 log = logging.getLogger(__name__)
@@ -32,7 +31,7 @@ def build_dataset(symbols: list[str] | None = None, side: str = "long") -> pd.Da
     prices, bench = load_many(symbols), benchmark()
     frames = []
     for s, df in prices.items():
-        f = label(add_nse(compute(df, bench), nse.for_symbol(s)), side=side)
+        f = label(compute(df, bench), side=side)
         f["symbol"], f["sector"] = s, sector.get(s, "")
         frames.append(f)
     data = pd.concat(frames)
@@ -156,7 +155,7 @@ def train(symbols: list[str] | None = None, test_months: int = 12, side: str = "
     data = build_dataset(symbols, side)
     data = data.dropna(subset=BASE_FEATURES + ["y"])
     data = data[data.traded_value_20 > 1e7]
-    feature_sets = feature_sets or {"base": BASE_FEATURES, "base+nse": ALL_FEATURES}
+    feature_sets = feature_sets or {"base": BASE_FEATURES}
     results = {name: _fit_eval(data, feats, test_months, side)[0] for name, feats in feature_sets.items()}
     best = max(results, key=lambda k: quality(results[k]))
     feats = feature_sets[best]
@@ -175,8 +174,8 @@ def train(symbols: list[str] | None = None, test_months: int = 12, side: str = "
 
 
 def train_all() -> dict:
-    nse.update_recent(10)
-    return {side: train(side=side) for side in ("long", "short")}
+    """Retrain the live (long) model on fresh data."""
+    return {"long": train(side="long")}
 
 
 _cache = {}
