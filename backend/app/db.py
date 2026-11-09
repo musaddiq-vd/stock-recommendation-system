@@ -124,7 +124,7 @@ def performance(version: str, recent: int = 25) -> dict:
         rows = [dict(r) for r in c.execute(
             "SELECT symbol, as_of, tier, entry, target, stop_loss, outcome, outcome_ret, outcome_days, "
             "json_extract(data, '$.gates.agent') AS agent_clear, "
-            "json_extract(data, '$.gates.ml_top') AND json_extract(data, '$.gates.breadth') AS market_gates "
+            "json_extract(data, '$.gates.ml_top') AND json_extract(data, '$.gates.market') AS market_gates "
             "FROM picks "
             "WHERE id IN (SELECT MAX(id) FROM picks GROUP BY symbol, as_of) AND outcome IS NOT 'retired' "
             "AND json_extract(data, '$.scoring_version') = ? ORDER BY as_of DESC", (version,)).fetchall()]
@@ -132,7 +132,7 @@ def performance(version: str, recent: int = 25) -> dict:
             "SELECT COUNT(DISTINCT symbol || as_of) FROM picks WHERE json_extract(data, '$.scoring_version') IS NOT ?",
             (version,)).fetchone()[0]
     tiers = {k: _stats(g) for k, g in _group(rows, lambda r: r["tier"]).items()}
-    # Agent veto check: same setup (ML top 2% + breadth passed), agent cleared vs agent vetoed.
+    # Agent veto check: same setup (ML top 2% + market gate passed), agent cleared vs agent vetoed.
     # If vetoed picks do as well as cleared ones, the veto is not earning its keep.
     eligible = [r for r in rows if r["market_gates"]]
     agent = {k: _stats(g) for k, g in _group(eligible, lambda r: "cleared" if r["agent_clear"] else "vetoed").items()}

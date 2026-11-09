@@ -13,7 +13,8 @@ import numpy as np
 import pandas as pd
 
 from .. import alerts, db
-from ..config import (AGENT_TOP_N, BREADTH_MIN, HOLD_MAX_DAYS, HOLD_MIN_DAYS, MIN_AVG_TRADED_VALUE, ML_TOP_PCT,
+from ..config import (AGENT_TOP_N, BREADTH_MIN, HOLD_MAX_DAYS, HOLD_MIN_DAYS, MIN_AVG_TRADED_VALUE,
+                      ML_TOP_PCT,
                       SCORING_VERSION,
                       STOP_ATR)
 from ..data import nse
@@ -88,8 +89,8 @@ def hist_stats(prob: float) -> dict:
 
 
 def tier(verdict: str, gates: dict) -> str:
-    """One Buy tier ("strong"), and only when every gate passes: it maps exactly to the live-setting variant of
-    the survivorship-free walk-forward (ML top 2% + breadth), with the agent able to veto."""
+    """One Buy tier ("strong"), only when every gate passes: it maps exactly to the live-setting variant of
+    the survivorship-free walk-forward (ML top 2% + Nifty and breadth above their 200-day averages)."""
     if verdict == "avoid":
         return "avoid"
     return "strong" if verdict == "buy" and all(gates.values()) else "watch"
@@ -105,7 +106,8 @@ def judge(row, market: dict, res: dict, ml_pct: int) -> dict:
         res["event_risk"] = f"{official['purpose']} on {official['date']} (official NSE calendar)"
     agent_ok = (not res.get("parse_error") and not res.get("red_flags") and res.get("news_sentiment") != "negative"
                 and not res.get("event_in_window"))
-    gates = {"ml_top": ml_pct >= ML_TOP_PCT, "breadth": market.get("breadth50", 0) > BREADTH_MIN,
+    gates = {"ml_top": ml_pct >= ML_TOP_PCT,
+             "market": bool(market.get("above_ema200")) and market.get("breadth200", 0) > BREADTH_MIN,
              "agent": bool(agent_ok)}
     verdict = "avoid" if res.get("red_flags") else "buy" if agent_ok else "watch"
     return {"score": float(ml_pct), "verdict": verdict, "gates": gates, "tier": tier(verdict, gates),
@@ -130,9 +132,9 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
             market["flows"] = {}
         db.update_scan(scan_id, market=market)
         scored = score_universe()
-        # market breadth: share of liquid Nifty 500 stocks above their 50-day average
+        # market breadth: share of liquid Nifty 500 stocks above their 200-day average
         liquid = scored[scored.traded_value_20 >= MIN_AVG_TRADED_VALUE]
-        market["breadth50"] = round(float((liquid.dist_ema50 > 0).mean()), 3)
+        market["breadth200"] = round(float((liquid.dist_ema200 > 0).mean()), 3)
         db.update_scan(scan_id, market=market)
         members = set(get_index(universe).symbol)
         pool = scored[scored.symbol.isin(members) & (scored.traded_value_20 >= MIN_AVG_TRADED_VALUE)]
@@ -181,7 +183,8 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
         picks.sort(key=lambda p: -p["score"])
         db.save_picks(scan_id, picks)
         db.update_scan(scan_id, status="done")
-        log_step(f"Done: {sum(p['tier'] == 'strong' for p in picks)} Buy, breadth {market['breadth50']:.0%}")
+        log_step(f"Done: {sum(p['tier'] == 'strong' for p in picks)} Buy · Nifty above 200-day average: "
+                 f"{'yes' if market['above_ema200'] else 'no'} · breadth {market['breadth200']:.0%}")
         try:
             alerts.scan_summary(db.get_scan(scan_id))
         except Exception:

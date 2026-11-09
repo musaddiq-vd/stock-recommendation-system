@@ -164,6 +164,7 @@ def report(source: str = "pit") -> dict:
     walk_df = pd.read_parquet(OUT / f"walk_{source}.parquet")
     df = walk_df.merge(data, on=["date", "symbol"], how="inner")
     df = df[df.traded_value_20 > 1e7]
+    calendar = sorted(data.date.unique())  # every trading day, so holding periods are counted correctly
     rng = np.random.default_rng(0)
     df["p_rand"] = rng.random(len(df))
     df["pct_rand"] = df.groupby("date").p_rand.rank(pct=True)
@@ -187,14 +188,16 @@ def report(source: str = "pit") -> dict:
         "LightGBM + breadth50 + rubric>=70": (gbm[(gbm.breadth50 > 0.5) & (gbm.rubric >= 70)], "open", COST_REAL),
         "LightGBM + breadth50 + rubric>=50": (gbm[(gbm.breadth50 > 0.5) & (gbm.rubric >= 50)], "open", COST_REAL),
         "LightGBM + breadth50>60%": (gbm[gbm.breadth50 > 0.6], "open", COST_REAL),
+        "LightGBM + breadth50>50% + max 2 per sector": (gbm[gbm.breadth50 > 0.5], "open", COST_REAL, 2),
         "Ensemble + Nifty + rubric>=70": (ens[ens.mkt_above_200 & (ens.rubric >= 70)], "open", COST_REAL),
     }
     rows, yearly = [], {}
-    for name, (sig, mode, cost) in variants.items():
+    for name, (sig, mode, cost, *cap) in variants.items():
         rcol, dcol = f"r_{mode}", f"d_{mode}"
         sig = sig.dropna(subset=[rcol])
-        res = portfolio(sig, rcol, dcol, cost=cost)
-        held = portfolio(sig[sig.date >= SPLIT], rcol, dcol, cost=cost)
+        kw = {"cost": cost, "calendar": calendar, "max_per_sector": cap[0] if cap else None}
+        res = portfolio(sig, rcol, dcol, **kw)
+        held = portfolio(sig[sig.date >= SPLIT], rcol, dcol, **kw)
         if not res:
             continue
         rows.append({"variant": name, **_summ(res),
@@ -214,23 +217,26 @@ def report(source: str = "pit") -> dict:
 
 
 def export(source: str = "pit", breadth_min: float = 0.5) -> dict:
-    """Dashboard summary of the live setting (ML top 2% + breadth gate), honest universe, realistic fills."""
+    """Dashboard summary of the live setting (ML top 2% + Nifty and breadth above their 200-day averages),
+    honest universe, realistic fills. The rule was chosen on pre-2016 data among the tested regimes."""
     data = pd.read_parquet(OUT / f"dataset_{source}.parquet")
     df = pd.read_parquet(OUT / f"walk_{source}.parquet").merge(data, on=["date", "symbol"], how="inner")
     df = df[df.traded_value_20 > 1e7].dropna(subset=["r_open"])
+    calendar = sorted(data.date.unique())
     rng = np.random.default_rng(0)
     df["p_rand"] = rng.random(len(df))
     rnd = df[df.groupby("date").p_rand.rank(pct=True) >= 0.98].assign(prob=lambda x: x.p_rand)
     top = df[df.pct_gbm >= 0.98].assign(prob=lambda x: x.p_gbm)
     variants = {"Random pick (same universe)": rnd, "ML top 2%": top,
-                f"ML + breadth > {breadth_min:.0%} (live setting)": top[top.breadth50 > breadth_min]}
+                "ML + Nifty & breadth above 200-day averages (live setting)":
+                    top[top.mkt_above_200 & (top.breadth200 > breadth_min)]}
     out = {"source": source, "target_atr": TARGET, "stop_atr": STOP, "split": SPLIT, "cost": COST_REAL,
            "entry": "next-day open with gap fills", "breadth_min": breadth_min,
            "survivorship_free": source == "pit", "symbols": int(data.symbol.nunique()),
            "from": str(df.date.min().date()), "to": str(df.date.max().date()), "variants": []}
     for name, sig in variants.items():
-        res = portfolio(sig, "r_open", "d_open", cost=COST_REAL)
-        held = portfolio(sig[sig.date >= SPLIT], "r_open", "d_open", cost=COST_REAL)
+        res = portfolio(sig, "r_open", "d_open", cost=COST_REAL, calendar=calendar)
+        held = portfolio(sig[sig.date >= SPLIT], "r_open", "d_open", cost=COST_REAL, calendar=calendar)
         eq = res["equity"].resample("W").last().dropna()
         out["variants"].append({"name": name, **_summ(res), "yearly": res["yearly"],
                                 "holdout": _summ(held) if held else None,

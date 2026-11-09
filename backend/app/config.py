@@ -29,7 +29,9 @@ AGENT_TOP_N = int(os.getenv("AGENT_TOP_N", 15))
 
 # Rules chosen by the survivorship-free 22-year walk-forward (app/research/v2.py, delisted stocks included)
 ML_TOP_PCT = float(os.getenv("ML_TOP_PCT", 98))         # only the top 2% of the daily ML ranking can be a Buy
-BREADTH_MIN = float(os.getenv("BREADTH_MIN", 0.5))      # Buy only when > 50% of stocks are above their 50-day average
+# Market gate, chosen on pre-2016 data and confirmed on 2016+: Nifty above its 200-day average AND
+# more than half of the liquid stocks above their own 200-day averages
+BREADTH_MIN = float(os.getenv("BREADTH_MIN", 0.5))
 
 BENCHMARK = "^NSEI"
 
@@ -40,4 +42,4 @@ RUN_SCHEDULER = os.getenv("RUN_SCHEDULER", "1") == "1"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Bump when tiers or scoring rules change, so the live track record never mixes different rule sets
-SCORING_VERSION = "5"
+SCORING_VERSION = "7"

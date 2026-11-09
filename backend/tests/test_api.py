@@ -102,7 +102,7 @@ def test_paper_trade_opens_at_current_price(monkeypatch):
 
 
 def test_tier_rules():
-    ok = {"ml_top": True, "breadth": True, "agent": True}
+    ok = {"ml_top": True, "market": True, "agent": True}
     assert orchestrator.tier("buy", ok) == "strong"
     for gate in ok:  # every gate is required: the Buy tier maps to exactly one backtested variant
         assert orchestrator.tier("buy", {**ok, gate: False}) == "watch"
@@ -135,9 +135,9 @@ def test_agent_veto_check_splits_cleared_and_vetoed():
     db.init()
     base = {"levels": {"entry": 100, "target": 110, "stop_loss": 95}, "as_of": "2026-02-02", "score": 80,
             "tier": "strong", "scoring_version": "veto-v"}
-    picks = [{**base, "symbol": "AAA", "gates": {"ml_top": True, "breadth": True, "agent": True}},
-             {**base, "symbol": "BBB", "gates": {"ml_top": True, "breadth": True, "agent": False}, "tier": "watch"},
-             {**base, "symbol": "CCC", "gates": {"ml_top": True, "breadth": False, "agent": False}, "tier": "watch"}]
+    picks = [{**base, "symbol": "AAA", "gates": {"ml_top": True, "market": True, "agent": True}},
+             {**base, "symbol": "BBB", "gates": {"ml_top": True, "market": True, "agent": False}, "tier": "watch"},
+             {**base, "symbol": "CCC", "gates": {"ml_top": True, "market": False, "agent": False}, "tier": "watch"}]
     sid = db.create_scan("NIFTY50", None, "news")
     db.save_picks(sid, picks)
     for p in db.open_picks():

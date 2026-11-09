@@ -58,7 +58,7 @@ def test_evaluate_uses_live_bar_for_today():
 def test_judge_gates_and_veto(monkeypatch):
     monkeypatch.setattr(orchestrator, "window_event", lambda s: None)
     row = type("R", (), {"rubric": 80.0, "symbol": "TCS"})()
-    bull = {"regime": "bullish", "above_ema200": True, "breadth50": 0.62}
+    bull = {"regime": "bullish", "above_ema200": True, "breadth200": 0.62}
     clear = {"news_sentiment": "positive", "red_flags": [], "event_in_window": False, "parse_error": False}
     j = orchestrator.judge(row, bull, dict(clear), 99)
     assert j["tier"] == "strong" and all(j["gates"].values())
@@ -76,6 +76,9 @@ def test_judge_needs_top_rank_and_breadth(monkeypatch):
     monkeypatch.setattr(orchestrator, "window_event", lambda s: None)
     row = type("R", (), {"rubric": 80.0, "symbol": "TCS"})()
     clear = {"news_sentiment": "neutral", "red_flags": [], "event_in_window": False, "parse_error": False}
-    assert orchestrator.judge(row, {"breadth50": 0.62}, dict(clear), 97)["tier"] == "watch"  # not top 2%
-    assert orchestrator.judge(row, {"breadth50": 0.41}, dict(clear), 99)["tier"] == "watch"  # weak breadth
-    assert orchestrator.judge(row, {"breadth50": 0.62}, dict(clear), 99)["tier"] == "strong"
+    good = {"above_ema200": True, "breadth200": 0.62}
+    assert orchestrator.judge(row, good, dict(clear), 97)["tier"] == "watch"  # not top 2%
+    assert orchestrator.judge(row, {**good, "breadth200": 0.41}, dict(clear), 99)["tier"] == "watch"  # weak breadth
+    assert orchestrator.judge(row, {**good, "above_ema200": False}, dict(clear), 99)["tier"] == "watch"  # Nifty weak
+    assert orchestrator.judge(row, good, dict(clear), 99)["tier"] == "strong"
+
