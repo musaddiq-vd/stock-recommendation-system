@@ -64,6 +64,10 @@ def get_latest_picks(universe: str | None = None, sector: str | None = None, lim
     if not scan:
         return {"error": "No completed scan yet. Ask the user to run a scan from the dashboard."}
     settings = db.get_settings()
+    try:  # the model may send numbers as text
+        limit = max(1, min(int(limit or 10), 50))
+    except (TypeError, ValueError):
+        limit = 10
     try:
         cap = float(capital) if capital else float(settings["capital"])
         risk = float(settings["risk_pct"])

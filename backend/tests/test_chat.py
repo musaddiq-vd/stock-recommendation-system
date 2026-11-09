@@ -39,3 +39,11 @@ def test_size_is_capped_by_capital_and_rejects_bad_levels():
     assert chat.position_size(LV, 1000, 50)["qty"] == 10  # risk allows 50, capital only 10
     assert chat.position_size({"entry": 100, "target": 120, "stop_loss": 100}, 1000, 1) is None
     assert chat.position_size(LV, 500, 1)["qty"] == 0
+
+
+def test_limit_and_capital_sent_as_text():
+    _scan("CHATC", {"above_ema200": True, "breadth200": 0.6},
+          [_pick(f"S{i}", "strong", {"ml_top": True, "market": True, "agent": True}) for i in range(5)])
+    r = chat.get_latest_picks("CHATC", limit="2", capital="50000")
+    assert len(r["buy_calls"]) == 2 and r["buy_calls"][0]["size"]["qty"] == 50
+    assert chat.get_latest_picks("CHATC", limit="lots")["buy_calls"]  # bad limit falls back to the default
