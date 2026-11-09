@@ -213,7 +213,7 @@ def scans():
 @app.get("/api/scans/latest")
 def latest(universe: str | None = None, include_running: bool = False):
     if universe and universe.upper() not in UNIVERSES:
-        raise HTTPException(400, "bad universe")
+        raise HTTPException(400, "universe must be NIFTY50, NIFTY100 or NIFTY500")
     return db.latest_scan(universe.upper() if universe else None, done_only=not include_running) or {}
 
 
@@ -292,11 +292,11 @@ class ChatReq(BaseModel):
 
 @app.post("/api/chat")
 def chat(req: ChatReq):
+    if req.messages[-1].role != "user" or not req.messages[-1].content.strip():
+        raise HTTPException(400, "Type a question first")
     msgs = [m.model_dump() for m in req.messages if m.content.strip()][-20:]
     while msgs and msgs[0]["role"] != "user":  # Bedrock needs the conversation to start with the user
         msgs.pop(0)
-    if not msgs or msgs[-1]["role"] != "user":
-        raise HTTPException(400, "The last message must come from the user")
 
     def gen():
         try:
@@ -384,6 +384,8 @@ def paper_list(refresh: bool = True):
 
 @app.post("/api/paper")
 def paper_open(req: PaperReq):
+    if req.target <= req.stop_loss:
+        raise HTTPException(400, "Target must be above the stop-loss for a buy trade")
     try:
         return paper.open_trade(_symbol(req.symbol), req.qty, req.target, req.stop_loss, req.scan_id)
     except paper.TradeRejected as e:
@@ -392,12 +394,19 @@ def paper_open(req: PaperReq):
 
 @app.post("/api/paper/{trade_id}/close")
 def paper_close(trade_id: int):
+    trade = db.get_paper(trade_id)
+    if not trade:
+        raise HTTPException(404, "Paper trade not found")
+    if trade["status"] != "open":
+        raise HTTPException(409, "This paper trade is already closed")
     paper.close(trade_id)
     return paper.portfolio()
 
 
 @app.delete("/api/paper/{trade_id}")
 def paper_delete(trade_id: int):
+    if not db.get_paper(trade_id):
+        raise HTTPException(404, "Paper trade not found")
     db.delete_paper(trade_id)
     return {"ok": True}
 
@@ -413,7 +422,7 @@ def sectors(index: str = "NIFTY500"):
     from .sectors import sector_heatmap
 
     if index.upper() not in UNIVERSES:
-        raise HTTPException(400, "bad index")
+        raise HTTPException(400, "index must be NIFTY50, NIFTY100 or NIFTY500")
     return sector_heatmap(index)
 
 

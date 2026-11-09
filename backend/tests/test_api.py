@@ -189,3 +189,16 @@ def test_stale_data_raises_one_ops_alert(monkeypatch):
     sent.clear()
     main.check_data_freshness()
     assert sent == []  # one session behind is normal
+
+
+def test_paper_edge_cases(client):
+    db.init_extra()
+    r = client.post("/api/paper", json={"symbol": "TCS", "qty": 1, "target": 10, "stop_loss": 20})
+    assert r.status_code == 400 and "above the stop" in r.json()["detail"]
+    assert client.post("/api/paper/987654/close").status_code == 404
+    assert client.delete("/api/paper/987654").status_code == 404
+
+
+def test_chat_blank_question(client):
+    r = client.post("/api/chat", json={"messages": [{"role": "user", "content": "  "}]})
+    assert r.status_code == 400 and r.json()["detail"] == "Type a question first"

@@ -224,6 +224,12 @@ def update_paper(trade_id: int, **kw):
         c.execute(f"UPDATE paper_trades SET {sets} WHERE id=?", (*kw.values(), trade_id))
 
 
+def get_paper(trade_id: int) -> dict | None:
+    with conn() as c:
+        r = c.execute("SELECT * FROM paper_trades WHERE id=?", (trade_id,)).fetchone()
+    return dict(r) if r else None
+
+
 def delete_paper(trade_id: int):
     with conn() as c:
         c.execute("DELETE FROM paper_trades WHERE id=?", (trade_id,))
