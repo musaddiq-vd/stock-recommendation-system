@@ -30,7 +30,7 @@ researches each one with LLM agents, and tracks every call against real market d
 | | Feature | What it does |
 |---|---|---|
 | 🧮 | **ML screener** | A LightGBM model ranks ~480 liquid NSE stocks every day by the probability that a long swing trade hits its target before its stop within 20 sessions. |
-| 🌡️ | **Market gate** | Buy calls only when Nifty and more than half of the market's stocks are above their 200-day averages; this cut the worst drawdown from −66% to −23% in the honest backtest. |
+| 🌡️ | **Market gate** | Buy calls only when Nifty and more than half of the market's stocks are above their 200-day averages; this cut the worst drawdown from −65% to −21% in the honest backtest. |
 | 🤖 | **Research agent** | For the top candidates, an LLM agent (AWS Bedrock) reads news, filings, fundamentals and official NSE event dates, and can veto a pick for red flags, negative news or results inside the holding window. |
 | 🟢 | **One honest Buy tier** | A stock is a green **Buy** only when all three checks pass: top 2% of the daily ML ranking, market gate open, research agent clear. Everything else is **Watch** or **Avoid**, never a buy. |
 | 🧭 | **Market context** | Nifty regime (bullish / neutral / bearish), FII/DII net flows and a sector **money-flow heatmap**. |
@@ -104,20 +104,27 @@ touched in one bar, the stop is assumed to hit first. Trades last ~13 sessions o
 
 ### 2. ML screener
 - **Features:** RSI, MACD, ADX, ATR %, distance from EMA 20/50/200 and 52-week high/low, volume surge,
-  Bollinger position, 5/20/60-day returns, relative strength vs Nifty, plus **cross-sectional ranks** and
-  **sector momentum** across the whole universe each day.
+  Bollinger position, 5/20/60/120-day returns, 12-month momentum (skipping the last month), volatility
+  contraction, days since the 1-year high, close location in the day's range, 60-day trend smoothness, relative
+  strength vs Nifty and vs the stock's own sector, plus **cross-sectional ranks** (momentum, trend smoothness,
+  liquidity) and **sector momentum** across the whole universe each day.
 - **Training:** ~2.3 million rows from the point-in-time universe (every stock as it was each month since 2003,
   including later-delisted ones), time-based split with an embargo so the held-out year never overlaps training labels.
   Training on today's survivors instead made the top picks much worse (profit factor 1.13 vs 1.36).
 - **Tried and dropped** because they did not improve the honest backtest: delivery %, futures OI and options PCR as
   features, short setups, a LightGBM + logistic-regression ensemble, isotonic probability calibration (it did not hold
   up in later years), a rule-based price-structure rubric as a gate (still shown on each pick for context), a cap of
-  2 Buys per sector, and breakeven / trailing stops (they cut the win rate to 30–45% without a consistent gain).
+  2 Buys per sector, breakeven / trailing stops (they cut the win rate to 30–45% without a consistent gain), and a
+  LightGBM ranking model or return regressor instead of the classifier (worse profit factor and twice the drawdown).
+- **Added after testing** (`python -m app.research.feature_lab`): the 11 newer features above raised the live rule's
+  profit factor from 1.50 to 1.66 on 2005–2015 data, where they were chosen, and from 1.30 to 1.34 on 2016–2026,
+  with the worst drawdown down from −23% to −20%. Picks scored with them carry scoring version 9.
 
 ### 3. Market gate
 Buy calls are only made when **Nifty is above its 200-day average and more than 50% of liquid Nifty 500 stocks are above
 their own 200-day averages**. Six market filters were compared; this one was the best on 2005–2015 data (profit factor
-1.53) and it held up on 2016–2026 data it was not chosen on (profit factor 1.30, worst drawdown −23%).
+1.53) and it held up on 2016–2026 data it was not chosen on. With the current model it scores profit factor 1.34 and a
+worst drawdown of −20% on 2016–2026.
 
 ### 4. Research agent (veto only)
 200 past signals were shown to the LLM with the name, sector and dates hidden and prices rebased to 100. Its chart
@@ -130,7 +137,7 @@ so the same facts give the same verdict.
 ### 5. Decision rule
 | Call | Rule | Backed by (22-year test, delisted stocks included) |
 |---|---|---|
-| 🟢 **Buy** | top 2% of the daily ML ranking, market gate open, agent clear | 51.6% profitable, profit factor 1.38, worst drawdown −23% (2016+: 50.8%, 1.30, −23%) |
+| 🟢 **Buy** | top 2% of the daily ML ranking, market gate open, agent clear | 52.0% profitable, profit factor 1.46, worst drawdown −21% (2016+: 50.2%, 1.34, −20%) |
 | ⚪ **Watch** | anything that fails a gate | – |
 | 🔴 **Avoid** | confirmed red flag | – |
 
@@ -151,12 +158,15 @@ before 2016; 2016–2026 is the out-of-sample check.
 | Strategy | Trades | Profitable | Profit factor | Worst drawdown | 2016+ profit factor |
 |---|---:|---:|---:|---:|---:|
 | Random pick, same universe | 3,850 | 46.4% | 1.03 | −78% | 1.10 |
-| ML top 2% | 4,343 | 49.7% | 1.20 | −66% | 1.23 |
-| ML top 2% + Nifty > 200-day average | 2,947 | 50.4% | 1.26 | −40% | 1.22 |
-| ML top 2% + 50-day breadth > 50% | 2,935 | 50.8% | 1.26 | −30% | 1.23 |
-| **ML top 2% + Nifty & 200-day breadth (live rule)** | **2,391** | **51.6%** | **1.38** | **−23%** | **1.30** |
+| ML top 2% | 4,355 | 50.4% | 1.28 | −65% | 1.27 |
+| ML top 2% + Nifty > 200-day average | 2,996 | 50.9% | 1.31 | −37% | 1.20 |
+| ML top 2% + 50-day breadth > 50% | 2,994 | 52.0% | 1.38 | −35% | 1.28 |
+| **ML top 2% + Nifty & 200-day breadth (live rule)** | **2,432** | **52.0%** | **1.46** | **−21%** | **1.34** |
 
-How much the earlier, rosier numbers were inflated:
+With the scoring version 8 features (before the 11 newer ones) the live rule scored 51.6%, profit factor 1.38 and
+−23% on the same test.
+
+How much the earlier, rosier numbers were inflated (version 8 features):
 
 | Same ML strategy | Profit factor |
 |---|---:|
@@ -180,6 +190,7 @@ python -m app.research.v2 report pit    # every variant above, plus calibration 
 python -m app.research.v2 export pit    # numbers shown in the dashboard's Backtest tab
 python -m app.research.exits pit        # sector caps, breakeven and trailing stops
 python -m app.research.training_data      # train on survivors vs point-in-time: which ranks better?
+python -m app.research.feature_lab extra   # candidate features (then: feature_lab run)
 ```
 The same pipeline runs on today's Nifty 500 with `yahoo` instead of `pit` (after `python -m app.research.history`).
 
@@ -191,14 +202,14 @@ on the point-in-time universe, ML top 2% only (no market or agent gate), next-op
 | Long model | Value |
 |---|---:|
 | Target-hit rate, random stock | 22.4% |
-| Target-hit rate, top ML signals | 25.7–27.6% |
-| Portfolio return (10 slots, top 2% signals) | +0.4% |
+| Target-hit rate, top ML signals | 23.8–26.1% |
+| Portfolio return (10 slots, top 2% signals) | +1.3% |
 | Nifty 50, same period | −10.6% |
-| Profitable trades after costs | 44.8% |
-| Max drawdown | −13.3% |
+| Profitable trades after costs | 44.4% |
+| Max drawdown | −15.7% |
 | Holdout AUC | 0.51 |
 
-A weak year for the model on its own: it stayed roughly flat while Nifty fell 10.6%. The market gate, which keeps the
+A weak year for the model on its own: it stayed roughly flat (+1.3%) while Nifty fell 10.6%. The market gate, which keeps the
 app out of most such periods, is not applied here; one year is too short to judge, so the 22-year test above is the
 reference.
 

@@ -4,7 +4,7 @@ import { inr, positionSize, Settings } from "@/lib/sizing";
 
 export const GATE_HINT: Record<string, string> = {
   ml_top: "In the top 2% of the daily ML ranking of ~480 stocks",
-  market: "Nifty above its 200-day average and more than half of stocks above theirs (worst drawdown -66% → -23% in the honest test)",
+  market: "Nifty above its 200-day average and more than half of stocks above theirs (worst drawdown -65% → -21% in the honest test)",
   regime: "Nifty above its 200-day average (older scans)",
   rubric: "Rule-based rubric score ≥ 70 (older scans)",
   agent: "Research agent found no red flags, no negative news and no results inside the holding window",
