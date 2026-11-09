@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   // self-contained server bundle for the Docker image
   output: "standalone",
   poweredByHeader: false,
+  // no next/image in this app: skip the image optimizer (and its native sharp dependency) entirely
+  images: { unoptimized: true },
   async headers() {
     return [
       {
