@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 from .config import (ALLOWED_ORIGINS, BENCHMARK, LOG_LEVEL, MODEL_PATH, RUN_SCHEDULER,  # noqa: I001 (loads .env first)
                      SCORING_VERSION, STORAGE)
 from . import alerts, auth, db, paper
+from . import sectors as sector_data
 from .agents.orchestrator import ScanBusy, market_regime, scan_running, start_scan, update_outcomes
 from .agents.tools import get_fundamentals, get_technicals
 from .chat import chat_stream
@@ -40,6 +41,7 @@ def daily_job():
         except Exception:
             log.exception("daily step failed")
     check_data_freshness()
+    threading.Thread(target=sector_data.warm, daemon=True, name="sectors-warm").start()
     try:
         start_scan("NIFTY500", None)
     except ScanBusy:
@@ -86,12 +88,13 @@ async def lifespan(app):
                           replace_existing=True)
         scheduler.add_job(intraday_job, "cron", day_of_week="mon-fri", hour="9-15", minute="*/15", id="intraday",
                           replace_existing=True)
-        # Markets change: retrain both models on fresh data on the 1st Saturday of every month
+        # Markets change: rebuild the point-in-time data and retrain the model on the 1st Saturday of every month
         scheduler.add_job(weekly_job, "cron", day_of_week="sat", hour=9, id="weekly", replace_existing=True)
         scheduler.add_job(train_all, "cron", day="1-7", day_of_week="sat", hour=10, id="retrain",
                           replace_existing=True)
         scheduler.start()
         log.info("scheduler started")
+        threading.Thread(target=sector_data.warm, daemon=True, name="sectors-warm").start()
     yield
     if scheduler.running:
         scheduler.shutdown(wait=False)

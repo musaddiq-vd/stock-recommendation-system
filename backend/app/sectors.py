@@ -1,4 +1,6 @@
 """Sector heatmap: returns, breadth and money flow per NSE sector."""
+import logging
+import threading
 import time
 
 import numpy as np
@@ -8,7 +10,10 @@ from .data import nse
 from .data.prices import benchmark, load_many
 from .universe import get_index, get_universe
 
+log = logging.getLogger(__name__)
 _cache: dict = {}
+_lock = threading.Lock()  # one computation at a time; requests that arrive meanwhile then read the cache
+TTL = 6 * 3600  # daily data: the scheduler refreshes it after the evening data update
 
 
 def _stock_row(df: pd.DataFrame, bench: pd.Series, dl: pd.DataFrame | None) -> dict | None:
@@ -68,8 +73,25 @@ def quadrant(x: float, y: float) -> str:
 
 def sector_heatmap(index: str = "NIFTY500") -> dict:
     key = index.upper()
-    if key in _cache and time.time() - _cache[key]["ts"] < 900:
+    if key in _cache and time.time() - _cache[key]["ts"] < TTL:
         return _cache[key]["data"]
+    with _lock:
+        if key in _cache and time.time() - _cache[key]["ts"] < TTL:
+            return _cache[key]["data"]
+        return _compute(key)
+
+
+def warm(indexes=("NIFTY500", "NIFTY100", "NIFTY50")) -> None:
+    """Recompute the heatmaps in the background so the first visitor does not wait ~30 s."""
+    for key in indexes:
+        try:
+            with _lock:
+                _compute(key)
+        except Exception:
+            log.exception("sector heatmap warm-up failed for %s", key)
+
+
+def _compute(key: str) -> dict:
     uni = get_universe()
     members = set(get_index(key).symbol)
     uni = uni[uni.symbol.isin(members)]
