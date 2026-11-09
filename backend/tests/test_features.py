@@ -21,7 +21,7 @@ def test_features_have_no_lookahead():
 
 
 def test_label_matches_manual_barrier():
-    f = label(compute(_df(seed=3)))
+    f = label(compute(_df(seed=3)), entry="close")
     i = 250
     r = f.iloc[i]
     tgt, stp = r.close + 3.5 * r.atr, r.close - 1.75 * r.atr

@@ -127,11 +127,52 @@ def barrier_outcomes(c, h, l, atr, target_atr: float, stop_atr: float, horizon: 
     return y, ret, days
 
 
+def next_open_outcomes(o, h, l, c, atr, target_atr: float, stop_atr: float, horizon: int):
+    """Realistic long trade: signal at day i's close, BUY at day i+1's open, levels set from that fill.
+
+    Bars i+1 .. i+horizon are checked. A gap through a level fills at the open (a gap below the stop
+    loses more than the stop; a gap above the target gains more). Stop wins when both are touched in one
+    bar. Unresolved trades exit at the close of bar i+horizon. Returns (y, ret, days, entry); y=1 when
+    the target is reached. The last `horizon` rows are NaN (outcome unknown).
+    """
+    o, h, l, c, atr = (np.asarray(x, dtype=float) for x in (o, h, l, c, atr))
+    n = len(c)
+    entry = np.full(n, np.nan)
+    entry[: n - 1] = o[1:]
+    tgt = entry + target_atr * atr
+    stp = entry - stop_atr * atr
+    y, ret, days = np.zeros(n), np.full(n, np.nan), np.full(n, float(horizon))
+    open_ = ~np.isnan(entry)
+    for j in range(1, horizon + 1):
+        oj, hj, lj = (np.full(n, np.nan) for _ in range(3))
+        oj[: n - j], hj[: n - j], lj[: n - j] = o[j:], h[j:], l[j:]
+        gap_stop = open_ & (j > 1) & (oj <= stp)  # on the entry bar the open IS the fill
+        stop_hit = open_ & ~gap_stop & (lj <= stp)
+        gap_tgt = open_ & ~gap_stop & ~stop_hit & (j > 1) & (oj >= tgt)
+        tgt_hit = open_ & ~gap_stop & ~stop_hit & ~gap_tgt & (hj >= tgt)
+        for mask, price, win in ((gap_stop, oj, 0), (stop_hit, stp, 0), (gap_tgt, oj, 1), (tgt_hit, tgt, 1)):
+            ret[mask] = price[mask] / entry[mask] - 1
+            days[mask] = j
+            y[mask] = win
+        open_ &= ~(gap_stop | stop_hit | gap_tgt | tgt_hit)
+    still = open_.copy()
+    still[n - horizon:] = False
+    ret[still] = c[np.where(still)[0] + horizon] / entry[still] - 1
+    for a in (y, ret, days):
+        a[n - horizon:] = np.nan
+    return y, ret, days, entry
+
+
 def label(f: pd.DataFrame, horizon: int = HOLD_MAX_DAYS, side: str = "long",
-          target_atr: float = TARGET_ATR, stop_atr: float = STOP_ATR) -> pd.DataFrame:
-    """Adds y / trade_ret / days_held columns using the triple barrier (see barrier_outcomes)."""
-    y, ret, days = barrier_outcomes(f.close.values, f.high.values, f.low.values, f.atr.values,
-                                    target_atr, stop_atr, horizon, side)
+          target_atr: float = TARGET_ATR, stop_atr: float = STOP_ATR, entry: str = "next_open") -> pd.DataFrame:
+    """Adds y / trade_ret / days_held. Default: bought at the next day's open with gap fills
+    (next_open_outcomes), which is how the trade can really be taken; entry="close" keeps the idealised version."""
+    if entry == "next_open" and side == "long":
+        y, ret, days, _ = next_open_outcomes(f.open.values, f.high.values, f.low.values, f.close.values,
+                                             f.atr.values, target_atr, stop_atr, horizon)
+    else:
+        y, ret, days = barrier_outcomes(f.close.values, f.high.values, f.low.values, f.atr.values,
+                                        target_atr, stop_atr, horizon, side)
     f = f.copy()
     f["y"], f["trade_ret"], f["days_held"] = y, ret, days
     return f

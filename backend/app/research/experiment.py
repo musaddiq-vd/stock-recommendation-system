@@ -109,7 +109,7 @@ def walk_forward(side: str = "long", label_cfg: str = "t3.5_s2", first_test_year
 
 
 # ---------------------------------------------------------------- evaluation
-def portfolio(sig: pd.DataFrame, rcol: str, dcol: str, slots: int = 10) -> dict:
+def portfolio(sig: pd.DataFrame, rcol: str, dcol: str, slots: int = 10, cost: float = COST) -> dict:
     """10 equal slots, best-ranked first, one position per stock, positions held until their barrier exit."""
     sig = (sig[["date", "symbol", "prob", rcol, dcol]].rename(columns={rcol: "ret_", dcol: "days_"})
            .sort_values(["date", "prob"], ascending=[True, False]))
@@ -123,9 +123,9 @@ def portfolio(sig: pd.DataFrame, rcol: str, dcol: str, slots: int = 10) -> dict:
         keep = []
         for p in open_pos:
             if p["exit_i"] <= i:
-                cash += p["alloc"] * (1 + p["ret"] - COST)
+                cash += p["alloc"] * (1 + p["ret"] - cost)
                 held.discard(p["symbol"])
-                trades.append((d, p["ret"] - COST))
+                trades.append((d, p["ret"] - cost))
             else:
                 keep.append(p)
         open_pos = keep

@@ -88,9 +88,10 @@ def _pick_threshold(te: pd.DataFrame) -> float:
     return round(float(te.prob.quantile(0.98)), 3)
 
 
-def simulate_portfolio(te: pd.DataFrame, threshold: float, slots: int = 10, cost: float = 0.002) -> dict:
+def simulate_portfolio(te: pd.DataFrame, threshold: float, slots: int = 10, cost: float = 0.003) -> dict:
     """Realistic-ish portfolio: max `slots` open trades, each 1/slots of equity at entry, best probability
-    first, one position per stock, round-trip cost `cost`. Positions are carried at cost until they exit."""
+    first, one position per stock, round-trip cost `cost` (0.2% charges + 0.1% slippage). Trades are entered at
+    the next day's open with gap fills (see features.next_open_outcomes). Positions are carried at cost until exit."""
     dates = np.array(sorted(te.date.unique()))
     sig = te[te.prob >= threshold].sort_values(["date", "prob"], ascending=[True, False])
     by_day = {d: g for d, g in sig.groupby("date")}
@@ -188,11 +189,6 @@ def load_model(side: str = "long"):
             raise FileNotFoundError("Model not trained. Run: python -m app.model.train")
         _cache[side] = joblib.load(path)
     return _cache[side]
-
-
-def prob_percentile(p: float, side: str = "long") -> int:
-    pct = load_model(side)["report"]["prob_percentiles"]
-    return int(np.searchsorted(pct, p))
 
 
 if __name__ == "__main__":
