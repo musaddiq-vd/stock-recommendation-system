@@ -13,7 +13,7 @@ import lightgbm as lgb
 import pandas as pd
 
 from ..config import HOLD_MAX_DAYS, STORAGE
-from ..features import BASE_FEATURES, PRICE_FEATURES, add_cross_sectional, barrier_outcomes, compute
+from ..features import BASE_FEATURES, PRICE_FEATURES, V8_FEATURES, add_cross_sectional, barrier_outcomes, compute
 from ..universe import get_universe
 from .history import benchmark, load_all
 
@@ -85,7 +85,7 @@ def walk_forward(side: str = "long", label_cfg: str = "t3.5_s2", first_test_year
     data = load_dataset()
     feats = BASE_FEATURES
     ycol = f"y_{side}_{label_cfg}"
-    data = data[data.traded_value_20 > 1e7].dropna(subset=feats)
+    data = data[data.traded_value_20 > 1e7].dropna(subset=V8_FEATURES)  # newer features may be empty (no 1-year high yet); the model handles that
     scored = []
     for year in range(first_test_year, data.date.max().year + 1):
         start = pd.Timestamp(f"{year}-01-01")

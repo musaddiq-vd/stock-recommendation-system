@@ -23,7 +23,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from ..config import HOLD_MAX_DAYS, STORAGE
-from ..features import BASE_FEATURES, PRICE_FEATURES, add_cross_sectional, barrier_outcomes, compute, next_open_outcomes
+from ..features import BASE_FEATURES, PRICE_FEATURES, V8_FEATURES, add_cross_sectional, barrier_outcomes, compute, next_open_outcomes
 from ..universe import get_universe
 from .experiment import portfolio
 from .rubric_proxy import proxy_score
@@ -111,7 +111,7 @@ def walk(source: str = "pit") -> pd.DataFrame:
     """Yearly walk-forward. Each year is scored by models trained only on data ending 40 days earlier."""
     data = pd.read_parquet(OUT / f"dataset_{source}.parquet")
     feats = BASE_FEATURES
-    data = data[data.traded_value_20 > 1e7].dropna(subset=feats)
+    data = data[data.traded_value_20 > 1e7].dropna(subset=V8_FEATURES)  # newer features may be empty (no 1-year high yet); the model handles that
     scored = []
     for year in range(FIRST_TEST_YEAR, data.date.max().year + 1):
         start = pd.Timestamp(f"{year}-01-01")
@@ -123,10 +123,11 @@ def walk(source: str = "pit") -> pd.DataFrame:
         t0 = time.time()
         gbm = lgb.LGBMClassifier(**PARAMS).fit(train[feats], train.y_open)
         lr = make_pipeline(StandardScaler(), LogisticRegression(C=0.1, max_iter=500))
-        lr.fit(train[feats].clip(-50, 50), train.y_open)
+        med = train[feats].median()  # logistic regression needs no gaps; LightGBM keeps them
+        lr.fit(train[feats].clip(-50, 50).fillna(med), train.y_open)
         s = test[["date", "symbol"]].copy()
         s["p_gbm"] = gbm.predict_proba(test[feats])[:, 1]
-        s["p_lr"] = lr.predict_proba(test[feats].clip(-50, 50))[:, 1]
+        s["p_lr"] = lr.predict_proba(test[feats].clip(-50, 50).fillna(med))[:, 1]
         s["p_ens"] = (s.p_gbm + s.p_lr) / 2
         for c in ("p_gbm", "p_lr", "p_ens"):
             s[c.replace("p_", "pct_")] = s.groupby("date")[c].rank(pct=True)

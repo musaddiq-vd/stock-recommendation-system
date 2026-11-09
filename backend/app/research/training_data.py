@@ -13,7 +13,7 @@ import lightgbm as lgb
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 
-from ..features import BASE_FEATURES
+from ..features import BASE_FEATURES, V8_FEATURES
 from .experiment import portfolio
 from .v2 import COST_REAL, HORIZON, OUT, PARAMS, SPLIT
 
@@ -24,8 +24,8 @@ def run(first_year: int = 2010) -> dict:
     feats = BASE_FEATURES
     pit = pd.read_parquet(OUT / "dataset_pit.parquet")
     yh = pd.read_parquet(OUT / "dataset_yahoo.parquet")
-    pit = pit[pit.traded_value_20 > 1e7].dropna(subset=feats)
-    yh = yh[yh.traded_value_20 > 1e7].dropna(subset=feats)
+    pit = pit[pit.traded_value_20 > 1e7].dropna(subset=V8_FEATURES)
+    yh = yh[yh.traded_value_20 > 1e7].dropna(subset=V8_FEATURES)
     calendar = sorted(pit.date.unique())
     scored = []
     for year in range(first_year, pit.date.max().year + 1):
