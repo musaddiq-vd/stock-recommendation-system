@@ -3,8 +3,13 @@
 #   docker compose up -d --build
 services:
   api:
-    build: ./backend
-    env_file: ./backend/.env
+    build:
+      context: ./backend
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.11-slim}
+    env_file:
+      - path: ./backend/.env
+        required: false
     environment:
       STORAGE_DIR: /data
       ALLOWED_ORIGINS: ${PUBLIC_WEB_URL:-http://localhost:3000}
@@ -19,6 +24,7 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8000}
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
     depends_on:
       - api
     ports:

@@ -1,0 +1,13 @@
+# Run the full app on your own machine with your existing data and AWS profile:
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+# - reuses ./backend/storage (prices, model, database) instead of an empty volume
+# - reads AWS credentials from ~/.aws (read-only) for Bedrock
+# - keeps the scheduler on: daily scan 18:30 IST, market-hours checks, monthly retrain
+services:
+  api:
+    volumes:
+      - ./backend/storage:/data
+      - ~/.aws:/home/appuser/.aws:ro
+    environment:
+      RUN_SCHEDULER: "1"
+      AWS_REGION: ${AWS_REGION:-us-east-1}
