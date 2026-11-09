@@ -85,3 +85,33 @@ def test_gap_below_stop_loses_more_than_stop():
     atr = np.full(len(o), 4.0)  # stop = 100 - 2.5*4 = 90
     y, ret, days, _ = next_open_outcomes(o, h, l, c, atr, 3.5, 2.5, 20)
     assert y[0] == 0 and round(ret[0], 3) == -0.2 and days[0] == 2  # filled at the 80 open, not the 90 stop
+
+
+def test_managed_exits_without_rules_match_plain_bracket():
+    from app.features import next_open_outcomes
+    from app.research.exits import managed_outcomes
+
+    df = _df(400, seed=5)
+    rng = np.random.default_rng(9)
+    df["open"] = df.close.shift().fillna(df.close) * (1 + rng.normal(0, 0.01, len(df)))
+    df["high"] = df[["open", "close"]].max(axis=1) * 1.01
+    df["low"] = df[["open", "close"]].min(axis=1) * 0.99
+    f = compute(df).dropna(subset=["atr"])
+    args = (f.open.values, f.high.values, f.low.values, f.close.values, f.atr.values)
+    _, r1, d1, _ = next_open_outcomes(*args, 3.5, 2.5, 20)
+    r2, d2 = managed_outcomes(*args, 3.5, 2.5, 20)
+    np.testing.assert_allclose(r1, r2, equal_nan=True)
+    np.testing.assert_allclose(d1, d2, equal_nan=True)
+
+
+def test_breakeven_stop_caps_the_loss_after_a_run_up():
+    from app.research.exits import managed_outcomes
+
+    # buy at 100 (ATR 4): day 2 reaches 105 (> +1 ATR) so the stop moves to 100; day 3 falls to 95
+    o = np.array([100, 100, 104, 99] + [99] * 25, dtype=float)
+    h = np.array([101, 101, 105, 100] + [100] * 25, dtype=float)
+    l_ = np.array([99, 99, 103, 95] + [95] * 25, dtype=float)
+    c = o.copy()
+    atr = np.full(len(o), 4.0)
+    r, d = managed_outcomes(o, h, l_, c, atr, 3.5, 2.5, 20, be_at=1.0)
+    assert round(r[0], 4) == round(99 / 100 - 1, 4) and d[0] == 3  # gapped to 99, under the breakeven stop
