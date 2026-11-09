@@ -1,4 +1,6 @@
-FROM python:3.11-slim
+# Base image is overridable, e.g. --build-arg PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.11-slim
+ARG PYTHON_IMAGE=python:3.11-slim
+FROM ${PYTHON_IMAGE}
 
 # libgomp is needed by LightGBM
 RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
