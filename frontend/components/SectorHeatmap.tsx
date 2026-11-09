@@ -209,7 +209,7 @@ function RotationMap({ sectors }: { sectors: Sector[] }) {
   ];
   return (
     <div className="space-y-2">
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-1">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-1 max-w-3xl">
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Sector rotation map">
           {quads.map(([q, x, y, w, h]) => (
             <g key={q}>

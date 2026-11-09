@@ -87,12 +87,12 @@ export default function ChatPanel() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full w-full min-w-0">
       <div className="px-4 py-3 border-b border-zinc-800">
         <div className="font-semibold text-white">Research Chat</div>
         <div className="text-xs text-zinc-500">The agent uses live data, news and web search</div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-3">
         {msgs.length === 0 && (
           <div className="space-y-2">
             {SUGGESTIONS.map((s) => (
@@ -104,7 +104,7 @@ export default function ChatPanel() {
         )}
         {msgs.map((m, i) => (
           <div key={i} className={m.role === "user" ? "flex justify-end" : ""}>
-            <div className={`rounded-xl px-3 py-2 text-sm max-w-[92%] ${m.role === "user" ? "bg-emerald-700 text-white" : "bg-zinc-900 text-zinc-200 border border-zinc-800"}`}>
+            <div className={`rounded-xl px-3 py-2 text-sm max-w-[92%] min-w-0 ${m.role === "user" ? "bg-emerald-700 text-white" : "bg-zinc-900 text-zinc-200 border border-zinc-800"}`}>
               {m.tools && m.tools.length > 0 && (
                 <div className="mb-1 space-y-0.5">
                   {m.tools.map((t, j) => (

@@ -113,7 +113,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 min-w-0 overflow-y-auto">
         <header className="sticky top-0 z-10 bg-zinc-950/90 backdrop-blur border-b border-zinc-800 px-6 py-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -259,7 +259,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
         )}
       </main>
 
-      <aside className={`${chatOpen ? "flex fixed inset-0 z-30" : "hidden"} lg:static lg:flex w-full lg:w-[400px] border-l border-zinc-800 bg-zinc-950`}>
+      <aside className={`${chatOpen ? "flex fixed inset-0 z-30" : "hidden"} lg:static lg:flex w-full lg:w-[400px] lg:shrink-0 min-w-0 overflow-hidden border-l border-zinc-800 bg-zinc-950`}>
         <ChatPanel />
       </aside>
       <button
