@@ -30,7 +30,7 @@ researches each one with LLM agents, and tracks every call against real market d
 | | Feature | What it does |
 |---|---|---|
 | 🧮 | **ML screener** | A LightGBM model ranks ~480 liquid NSE stocks every day by the probability that a long swing trade hits its target before its stop within 20 sessions. |
-| 🌡️ | **Market breadth gate** | Buy calls only when more than half of the market's stocks are above their 50-day average; this halved the worst drawdown in the honest backtest. |
+| 🌡️ | **Market gate** | Buy calls only when Nifty and more than half of the market's stocks are above their 200-day averages; this cut the worst drawdown from −66% to −23% in the honest backtest. |
 | 🤖 | **Research agent** | For the top candidates, an LLM agent (AWS Bedrock) reads news, filings, fundamentals and official NSE event dates, and can veto a pick for red flags, negative news or results inside the holding window. |
 | 🟢 | **Confidence tiers** | Final score = ML rank + a rule-based rubric, both validated on 22 years of walk-forward data. Green requires every gate: market regime, rubric and an AI agent veto check. |
 | 🧭 | **Market context** | Nifty regime (bullish / neutral / bearish), FII/DII net flows and a sector **money-flow heatmap**. |
@@ -110,12 +110,13 @@ touched in one bar, the stop is assumed to hit first. Trades last ~13 sessions o
   never overlaps training labels; the last 12 months are held out as an out-of-sample check.
 - **Tried and dropped** because they did not improve the honest backtest: delivery %, futures OI and options PCR as
   features, short setups, a LightGBM + logistic-regression ensemble, isotonic probability calibration (it did not hold
-  up in later years), and a rule-based price-structure rubric as a gate (still shown on each pick for context).
+  up in later years), a rule-based price-structure rubric as a gate (still shown on each pick for context), a cap of
+  2 Buys per sector, and breakeven / trailing stops (they cut the win rate to 30–45% without a consistent gain).
 
-### 3. Market breadth gate
-Each scan measures the share of liquid Nifty 500 stocks trading above their 50-day average. Buy calls are only made when
-it is above **50%**. In the survivorship-free test this beat the classic "Nifty above its 200-day average" filter on both
-profit factor and drawdown (worst drawdown −25% vs −48%).
+### 3. Market gate
+Buy calls are only made when **Nifty is above its 200-day average and more than 50% of liquid Nifty 500 stocks are above
+their own 200-day averages**. Six market filters were compared; this one was the best on 2005–2015 data (profit factor
+1.53) and it held up on 2016–2026 data it was not chosen on (profit factor 1.30, worst drawdown −23%).
 
 ### 4. Research agent (veto only)
 200 past signals were shown to the LLM with the name, sector and dates hidden and prices rebased to 100. Its chart
@@ -128,7 +129,7 @@ so the same facts give the same verdict.
 ### 5. Decision rule
 | Call | Rule | Backed by (22-year test, delisted stocks included) |
 |---|---|---|
-| 🟢 **Buy** | top 2% of the daily ML ranking, market breadth > 50%, agent clear | 50.8% profitable, profit factor 1.28, worst drawdown −25% |
+| 🟢 **Buy** | top 2% of the daily ML ranking, market gate open, agent clear | 51.6% profitable, profit factor 1.38, worst drawdown −23% (2016+: 50.8%, 1.30, −23%) |
 | ⚪ **Watch** | anything that fails a gate | – |
 | 🔴 **Avoid** | confirmed red flag | – |
 
@@ -148,10 +149,11 @@ before 2016; 2016–2026 is the out-of-sample check.
 
 | Strategy | Trades | Profitable | Profit factor | Worst drawdown | 2016+ profit factor |
 |---|---:|---:|---:|---:|---:|
-| Random pick, same universe | 3,840 | 46.4% | 1.03 | −78% | 1.10 |
-| ML top 2% | 4,333 | 49.8% | 1.20 | −66% | 1.24 |
-| ML top 2% + Nifty > 200-day average | 2,747 | 49.7% | 1.23 | −48% | 1.23 |
-| **ML top 2% + breadth > 50% (live rule)** | **2,516** | **50.8%** | **1.28** | **−25%** | **1.27** |
+| Random pick, same universe | 3,850 | 46.4% | 1.03 | −78% | 1.10 |
+| ML top 2% | 4,343 | 49.7% | 1.20 | −66% | 1.23 |
+| ML top 2% + Nifty > 200-day average | 2,947 | 50.4% | 1.26 | −40% | 1.22 |
+| ML top 2% + 50-day breadth > 50% | 2,935 | 50.8% | 1.26 | −30% | 1.23 |
+| **ML top 2% + Nifty & 200-day breadth (live rule)** | **2,391** | **51.6%** | **1.38** | **−23%** | **1.30** |
 
 How much the earlier, rosier numbers were inflated:
 
@@ -175,12 +177,13 @@ python -m app.research.v2 build pit     # features and realistic outcomes
 python -m app.research.v2 walk pit      # yearly walk-forward (LightGBM and logistic regression)
 python -m app.research.v2 report pit    # every variant above, plus calibration and AUC
 python -m app.research.v2 export pit    # numbers shown in the dashboard's Backtest tab
+python -m app.research.exits pit        # sector caps, breakeven and trailing stops
 ```
 The same pipeline runs on today's Nifty 500 with `yahoo` instead of `pit` (after `python -m app.research.history`).
 
 ### Latest model, last 12 months
 Out-of-sample period **Oct 2025 → Oct 2026**, model trained on the previous five years, next-open entries with gap fills,
-0.3% cost per trade, ML top 2% only (no breadth or agent gate).
+0.3% cost per trade, ML top 2% only (no market or agent gate).
 
 | Long model | Value |
 |---|---:|
@@ -264,7 +267,7 @@ environment variables, never from this repo.
 | `HOLD_MIN_DAYS` / `HOLD_MAX_DAYS` | `15` / `20` | Swing holding window |
 | `TARGET_ATR` / `STOP_ATR` | `3.5` / `2.5` | Barrier distances in ATR multiples |
 | `ML_TOP_PCT` | `98` | Minimum ML percentile for a Buy (top 2%) |
-| `BREADTH_MIN` | `0.5` | Minimum share of stocks above their 50-day average for any Buy |
+| `BREADTH_MIN` | `0.5` | Minimum share of stocks above their 200-day average (Nifty must also be above its own) |
 | `AGENT_TOP_N` | `15` | Default number of stocks sent to the agents |
 
 In-app **Settings** (stored in the local database): capital, risk per trade %, Telegram bot token and chat ID, alerts on/off.
@@ -374,6 +377,16 @@ docker compose up -d --build
   (allowed CORS origin) before `docker compose build`, and put both behind HTTPS (Caddy, Nginx or Cloudflare).
 - After the first start, train the models once inside the container:
   `docker compose exec api python -m app.model.train`
+
+### Run on your own computer
+```bash
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+```
+Uses your existing `backend/storage` data and `~/.aws` profile (read-only) and keeps the scheduler on. Docker Desktop must
+be running (enable "Start Docker Desktop when you sign in") for the daily scan and alerts. If Docker Hub pulls fail, put
+`PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.11-slim` and `NODE_IMAGE=public.ecr.aws/docker/library/node:22-alpine`
+in a root `.env` file to build from AWS's public mirror. This route also avoids Windows Smart App Control blocking
+Python's native libraries.
 
 ### Production checklist
 - [x] Password login with signed, expiring tokens and a rate limit on failed attempts
