@@ -95,16 +95,39 @@ def test_paper_trade_opens_at_current_price(monkeypatch):
                         index=[pd.Timestamp("2026-11-06")])
     monkeypatch.setattr(paper, "load_many", lambda syms: {"TCS": bars})
     monkeypatch.setattr(paper, "live_quotes", lambda syms: {"TCS": {"last": 104.0, "date": "2026-11-09"}})
-    t = paper.open_trade("TCS", "long", 10, None, target=110, stop_loss=95)
+    t = paper.open_trade("TCS", 10, target=110, stop_loss=95)
     assert t["entry"] == 104.0 and t["opened_on"] == "2026-11-09"
     with pytest.raises(paper.TradeRejected):  # price already above the target
-        paper.open_trade("TCS", "long", 10, None, target=103, stop_loss=95)
+        paper.open_trade("TCS", 10, target=103, stop_loss=95)
 
 
 def test_tier_rules():
     ok = {"regime": True, "rubric": True, "agent": True}
     assert orchestrator.tier(90, "buy", ok) == "strong"
-    assert orchestrator.tier(90, "buy", {**ok, "regime": False}) == "good"
+    assert orchestrator.tier(90, "buy", {**ok, "rubric": False}) == "good"
+    assert orchestrator.tier(90, "buy", {**ok, "regime": False}) == "watch"  # no regime, no tier backed by data
+    assert orchestrator.tier(80, "buy", ok) == "good"
     assert orchestrator.tier(90, "buy", {"regime": False, "rubric": False, "agent": True}) == "watch"
     assert orchestrator.tier(95, "watch", ok) == "watch"
     assert orchestrator.tier(95, "avoid", ok) == "avoid"
+
+
+def test_settings_have_no_short_selling_fields(client):
+    assert "margin_pct" not in client.get("/api/settings").json()
+
+
+def test_track_record_counts_each_trade_once():
+    db.init()
+    pick = {"symbol": "TCS", "levels": {"entry": 100, "target": 110, "stop_loss": 95}, "as_of": "2026-01-05",
+            "score": 90, "tier": "strong", "scoring_version": "test-v"}
+    old_rules = {**pick, "symbol": "INFY", "scoring_version": "old"}
+    for _ in range(2):  # the same recommendation from two scans
+        sid = db.create_scan("NIFTY50", None, "news")
+        db.save_picks(sid, [pick, old_rules])
+    for p in db.open_picks():
+        db.set_outcome(p["id"], "target", 0.1, 5)
+    perf = db.performance("test-v")
+    assert perf["tiers"]["strong"]["closed"] == 1 and perf["tiers"]["strong"]["win_rate"] == 1.0
+    assert len([r for r in perf["recent"] if r["symbol"] == "TCS"]) == 1
+    assert not any(r["symbol"] == "INFY" for r in perf["recent"])  # other rule sets never mix in
+    assert perf["earlier_version_picks"] >= 1

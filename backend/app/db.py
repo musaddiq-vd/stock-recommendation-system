@@ -109,21 +109,42 @@ def set_outcome(pick_id, outcome, ret, days):
         c.execute("UPDATE picks SET outcome=?, outcome_ret=?, outcome_days=? WHERE id=?", (outcome, ret, days, pick_id))
 
 
-def performance():
-    # the same stock recommended on the same day by several scans is one trade, not many
+CLOSED = ("target", "stop", "timeout")
+
+
+def performance(version: str, recent: int = 25) -> dict:
+    """Real outcomes of past recommendations made with scoring `version`, per tier.
+
+    Picks from older rule sets are only counted, never mixed into the tier numbers.
+    The same stock recommended on the same day by several scans counts once (latest scan's tier).
+    A win is a trade that closed in profit (target, or above entry at the 20-day exit), before costs.
+    """
     with conn() as c:
         rows = [dict(r) for r in c.execute(
-            "SELECT tier, outcome, outcome_ret FROM picks WHERE id IN ("
-            " SELECT MAX(id) FROM picks WHERE outcome IN ('target','stop','timeout') GROUP BY symbol, as_of)"
-        ).fetchall()]
-    out = {}
+            "SELECT symbol, as_of, tier, entry, target, stop_loss, outcome, outcome_ret, outcome_days FROM picks "
+            "WHERE id IN (SELECT MAX(id) FROM picks GROUP BY symbol, as_of) AND outcome IS NOT 'retired' "
+            "AND json_extract(data, '$.scoring_version') = ? ORDER BY as_of DESC", (version,)).fetchall()]
+        legacy = c.execute(
+            "SELECT COUNT(DISTINCT symbol || as_of) FROM picks WHERE json_extract(data, '$.scoring_version') IS NOT ?",
+            (version,)).fetchone()[0]
+    tiers = {}
     for r in rows:
-        t = out.setdefault(r["tier"], {"trades": 0, "wins": 0, "sum_ret": 0.0})
-        t["trades"] += 1
-        t["wins"] += r["outcome"] == "target"
-        t["sum_ret"] += r["outcome_ret"] or 0
-    return {k: {"trades": v["trades"], "win_rate": round(v["wins"] / v["trades"], 3),
-                "avg_ret": round(v["sum_ret"] / v["trades"], 4)} for k, v in out.items()}
+        t = tiers.setdefault(r["tier"], {"closed": 0, "open": 0, "wins": 0, "sum_ret": 0.0, "targets": 0})
+        if r["outcome"] in CLOSED:
+            t["closed"] += 1
+            t["wins"] += (r["outcome_ret"] or 0) > 0
+            t["targets"] += r["outcome"] == "target"
+            t["sum_ret"] += r["outcome_ret"] or 0
+        else:
+            t["open"] += 1
+    summary = {
+        k: {"closed": v["closed"], "open": v["open"],
+            "win_rate": round(v["wins"] / v["closed"], 3) if v["closed"] else None,
+            "target_rate": round(v["targets"] / v["closed"], 3) if v["closed"] else None,
+            "avg_ret": round(v["sum_ret"] / v["closed"], 4) if v["closed"] else None}
+        for k, v in tiers.items()}
+    closed = [r for r in rows if r["outcome"] in CLOSED][:recent]
+    return {"version": version, "tiers": summary, "recent": closed, "earlier_version_picks": legacy}
 
 
 # ---------- settings / paper trades / alerts ----------
@@ -135,7 +156,7 @@ CREATE TABLE IF NOT EXISTS paper_trades (
   exit_price REAL, exit_date TEXT, pnl REAL, last_price REAL, last_checked TEXT);
 CREATE TABLE IF NOT EXISTS alerts_sent (key TEXT PRIMARY KEY, sent_at TEXT);
 """
-DEFAULT_SETTINGS = {"capital": "500000", "risk_pct": "1", "margin_pct": "20", "alerts_enabled": "1",
+DEFAULT_SETTINGS = {"capital": "500000", "risk_pct": "1", "alerts_enabled": "1",
                     "telegram_bot_token": "", "telegram_chat_id": ""}
 
 

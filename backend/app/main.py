@@ -11,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from .config import ALLOWED_ORIGINS, BENCHMARK, LOG_LEVEL, MODEL_PATH, RUN_SCHEDULER, STORAGE  # noqa: I001 (loads .env first)
+from .config import (ALLOWED_ORIGINS, BENCHMARK, LOG_LEVEL, MODEL_PATH, RUN_SCHEDULER,  # noqa: I001 (loads .env first)
+                     SCORING_VERSION, STORAGE)
 from . import alerts, auth, db, paper
 from .agents.orchestrator import ScanBusy, market_regime, scan_running, start_scan, update_outcomes
 from .agents.tools import get_fundamentals, get_technicals
@@ -37,7 +38,7 @@ def daily_job():
         except Exception:
             log.exception("daily step failed")
     try:
-        start_scan("NIFTY500", None, "news")
+        start_scan("NIFTY500", None)
     except ScanBusy:
         log.warning("daily scan skipped: another scan is running")
 
@@ -143,7 +144,6 @@ def health():
 class ScanReq(BaseModel):
     universe: Literal["NIFTY50", "NIFTY100", "NIFTY500"] = "NIFTY100"
     sector: str | None = Field(default=None, max_length=80)
-    mode: Literal["news", "technical"] = "news"  # news = technical + web/news research
     top_n: int = Field(default=15, ge=3, le=40)
 
     @field_validator("universe", mode="before")
@@ -175,7 +175,7 @@ def scan(req: ScanReq):
     if not MODEL_PATH.exists():
         raise HTTPException(503, "Model not trained yet. Run: python -m app.model.train")
     try:
-        return {"scan_id": start_scan(req.universe, req.sector or None, req.mode, req.top_n)}
+        return {"scan_id": start_scan(req.universe, req.sector or None, req.top_n)}
     except ScanBusy:
         raise HTTPException(409, "A scan is already running. Wait for it to finish.")
 
@@ -218,9 +218,9 @@ def stock(symbol: str):
 
 
 @app.get("/api/model")
-def model_report(side: Literal["long", "short"] = "long"):
+def model_report():
     try:
-        r = dict(load_model(side)["report"])
+        r = dict(load_model()["report"])
     except FileNotFoundError:
         raise HTTPException(404, "Model not trained yet")
     r.pop("prob_percentiles", None)
@@ -230,7 +230,7 @@ def model_report(side: Literal["long", "short"] = "long"):
 @app.get("/api/performance")
 def performance():
     update_outcomes()
-    return db.performance()
+    return db.performance(SCORING_VERSION)
 
 
 # ---------------------------------------------------------------- chat
@@ -267,7 +267,6 @@ def chat(req: ChatReq):
 class SettingsReq(BaseModel):
     capital: float | None = Field(default=None, gt=0, le=1e11)
     risk_pct: float | None = Field(default=None, ge=0.05, le=10)
-    margin_pct: float | None = Field(default=None, ge=5, le=100)
     alerts_enabled: bool | None = None
     telegram_bot_token: str | None = Field(default=None, max_length=100, pattern=r"^(\d{5,15}:[\w-]{20,80})?$")
     telegram_chat_id: str | None = Field(default=None, max_length=30, pattern=r"^-?\d*$")
@@ -320,9 +319,7 @@ def test_alert():
 # ---------------------------------------------------------------- paper trading
 class PaperReq(BaseModel):
     symbol: str = Field(max_length=20)
-    side: Literal["long", "short"] = "long"
     qty: int = Field(gt=0, le=10_000_000)
-    lots: int | None = Field(default=None, ge=1, le=10_000)
     target: float = Field(gt=0)
     stop_loss: float = Field(gt=0)
     scan_id: int | None = None
@@ -341,8 +338,7 @@ def paper_list(refresh: bool = True):
 @app.post("/api/paper")
 def paper_open(req: PaperReq):
     try:
-        return paper.open_trade(_symbol(req.symbol), req.side, req.qty, req.lots, req.target, req.stop_loss,
-                                req.scan_id)
+        return paper.open_trade(_symbol(req.symbol), req.qty, req.target, req.stop_loss, req.scan_id)
     except paper.TradeRejected as e:
         raise HTTPException(400, str(e))
 
@@ -376,15 +372,12 @@ def sectors(index: str = "NIFTY500"):
 
 @app.get("/api/backtest")
 def backtest_report():
-    out = {}
-    for side in ("long", "short"):
-        try:
-            r = load_model(side)["report"]
-        except FileNotFoundError:
-            continue
-        out[side] = {k: r.get(k) for k in ("auc", "test_from", "test_to", "trained_at", "feature_set",
-                                           "comparison", "portfolio", "backtest")}
-        out[side]["top_features"] = (r.get("feature_importance") or [])[:10]
+    try:
+        r = load_model()["report"]
+    except FileNotFoundError:
+        raise HTTPException(404, "Model not trained yet")
+    out = {k: r.get(k) for k in ("auc", "test_from", "test_to", "trained_at", "portfolio", "backtest")}
+    out["top_features"] = (r.get("feature_importance") or [])[:10]
     return out
 
 
