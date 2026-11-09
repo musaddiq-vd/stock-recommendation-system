@@ -106,8 +106,9 @@ touched in one bar, the stop is assumed to hit first. Trades last ~13 sessions o
 - **Features:** RSI, MACD, ADX, ATR %, distance from EMA 20/50/200 and 52-week high/low, volume surge,
   Bollinger position, 5/20/60-day returns, relative strength vs Nifty, plus **cross-sectional ranks** and
   **sector momentum** across the whole universe each day.
-- **Training:** pooled data from all Nifty 500 stocks (~450k rows), time-based split with an embargo so the test year
-  never overlaps training labels; the last 12 months are held out as an out-of-sample check.
+- **Training:** ~2.3 million rows from the point-in-time universe (every stock as it was each month since 2003,
+  including later-delisted ones), time-based split with an embargo so the held-out year never overlaps training labels.
+  Training on today's survivors instead made the top picks much worse (profit factor 1.13 vs 1.36).
 - **Tried and dropped** because they did not improve the honest backtest: delivery %, futures OI and options PCR as
   features, short setups, a LightGBM + logistic-regression ensemble, isotonic probability calibration (it did not hold
   up in later years), a rule-based price-structure rubric as a gate (still shown on each pick for context), a cap of
@@ -178,28 +179,32 @@ python -m app.research.v2 walk pit      # yearly walk-forward (LightGBM and logi
 python -m app.research.v2 report pit    # every variant above, plus calibration and AUC
 python -m app.research.v2 export pit    # numbers shown in the dashboard's Backtest tab
 python -m app.research.exits pit        # sector caps, breakeven and trailing stops
+python -m app.research.training_data      # train on survivors vs point-in-time: which ranks better?
 ```
 The same pipeline runs on today's Nifty 500 with `yahoo` instead of `pit` (after `python -m app.research.history`).
 
 ### Latest model, last 12 months
-Out-of-sample period **Oct 2025 → Oct 2026**, model trained on the previous five years, next-open entries with gap fills,
-0.3% cost per trade, ML top 2% only (no market or agent gate).
+The live model is trained on the point-in-time universe (a model trained on today's survivors scored profit factor 1.13
+on the honest 2010–2026 walk-forward, against 1.36 when trained point-in-time). Its held-out year, **Oct 2025 → Oct 2026**,
+on the point-in-time universe, ML top 2% only (no market or agent gate), next-open entries, gaps, 0.3% cost:
 
 | Long model | Value |
 |---|---:|
-| Target-hit rate, random stock | 23.0% |
-| Target-hit rate, top ~1% ML signals | **30.9%** |
-| Portfolio return (10 slots, top 2% signals) | **+9.2%** |
+| Target-hit rate, random stock | 22.4% |
+| Target-hit rate, top ML signals | 25.7–27.6% |
+| Portfolio return (10 slots, top 2% signals) | +0.4% |
 | Nifty 50, same period | −10.6% |
-| Profitable trades after costs | 46.2% |
-| Max drawdown | −12.8% |
+| Profitable trades after costs | 44.8% |
+| Max drawdown | −13.3% |
+| Holdout AUC | 0.51 |
+
+A weak year for the model on its own: it stayed roughly flat while Nifty fell 10.6%. The market gate, which keeps the
+app out of most such periods, is not applied here; one year is too short to judge, so the 22-year test above is the
+reference.
 
 **Win rate** in this README means trades that closed in profit after costs (at the target, or above entry at the 20-day exit).
 **Target-hit rate** counts only trades that reached the full target before the stop.
 
-> [!NOTE]
-> The 12-month check uses today's Nifty 500, so it is flattered by survivorship bias; the 22-year point-in-time test
-> above is the number to trust.
 
 ---
 
@@ -231,7 +236,7 @@ pip install -r requirements-dev.txt  # runtime + test/lint tools
 cp .env.example .env                 # then edit if needed
 
 python -m app.data.nse              # one-time: ~4 months of NSE delivery data for the heatmap (~3 min)
-python -m app.model.train            # downloads prices, trains the model (~10 min)
+python -m app.model.train            # trains the model (uses point-in-time data if the research pipeline has run)
 uvicorn app.main:app --port 8000
 ```
 
@@ -285,9 +290,10 @@ In-app **Settings** (stored in the local database): capital, risk per trade %, T
 
 | Job | When (IST) | What it does |
 |---|---|---|
-| Daily scan | Mon–Fri 18:30 | Refresh NSE data and FII/DII, update outcomes and paper trades, run a Nifty 500 scan with research |
-| Intraday check | Mon–Fri 09:00–15:45, every 15 min | Check paper trades and open green picks against live prices; send target/stop alerts |
-| Retrain | 1st Saturday of each month, 10:00 | Retrain both models on fresh data and re-run the feature-set comparison |
+| Daily scan | Mon–Fri 18:30 | Refresh NSE data and FII/DII, update outcomes and paper trades, run a Nifty 500 scan with research; Telegram alert if data is stale or the scan fails |
+| Intraday check | Mon–Fri 09:00–15:45, every 15 min | Check paper trades and open Buy picks against live prices; send target/stop alerts |
+| Weekly summary | Saturday 09:00 | Telegram report: market gate, latest Buy calls, live track record, paper P&L |
+| Retrain | 1st Saturday of each month, 10:00 | Top up NSE bhavcopies, rebuild the point-in-time dataset, retrain the model |
 
 The backend must stay running for these jobs (see [Deployment](#-deployment)).
 
@@ -427,8 +433,7 @@ lock, recovery after restart and the tier rules. GitHub Actions runs all of it p
 - The statistical edge is modest; expect many losing trades even when the system works as designed.
 - The agent layer is evaluated only going forward (outcome tracking + paper trading), not in the historical backtest.
 - Free data feeds can lag, change format or rate-limit. NSE may block cloud/datacenter IPs.
-- The live model is trained on today's Nifty 500 (survivors); the point-in-time test shows the realistic edge is about
-  a third smaller than that training data suggests.
+- The edge is modest and uneven: some years lose money, and the last held-out year was flat for the model on its own.
 - The agent veto is measured live (Backtest tab → Agent veto check); judge it only after 100+ closed trades.
 - The LLM's news and fundamentals judgement cannot be backtested (no as-of-date news archive); only its chart reading was
   tested, and it showed no edge. Treat the agent as a risk filter, not a source of alpha.

@@ -47,7 +47,7 @@ export default function BacktestPanel() {
           <p className="text-xs text-zinc-400">
             Out-of-sample test: <b>{s.test_from} → {s.test_to}</b> (data the model never saw during training). Portfolio: max {s.portfolio.slots} positions,
             {" "}{Math.round(100 / s.portfolio.slots)}% of capital per trade, ML probability ≥ {s.portfolio.threshold} (top 2% signals), {(s.portfolio.cost * 100).toFixed(1)}% cost per trade.
-            Today&apos;s Nifty 500 only (survivors) and no breadth or agent gates; the 22-year section above is the honest test.
+            No market or agent gate is applied here, and one year is a small sample; the 22-year section above is the main test.
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
             <Box k="Strategy return" v={pct(s.portfolio.total_return)} good={s.portfolio.total_return >= 0} />
