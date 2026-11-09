@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-STORAGE = BASE_DIR / "storage"
+STORAGE = Path(os.getenv("STORAGE_DIR", str(BASE_DIR / "storage")))
 PRICE_DIR = STORAGE / "prices"
 UNIVERSE_DIR = STORAGE / "universe"
 MODEL_PATH = STORAGE / "model.joblib"
@@ -34,3 +34,9 @@ RUBRIC_MIN = float(os.getenv("RUBRIC_MIN", 70))            # rule-based rubric s
 SHORTS_ENABLED = os.getenv("SHORTS_ENABLED", "0") == "1"
 
 BENCHMARK = "^NSEI"
+
+# Server
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
+# The scheduler runs inside the API process: keep exactly one API worker, or set this to 0 on extra workers
+RUN_SCHEDULER = os.getenv("RUN_SCHEDULER", "1") == "1"
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
