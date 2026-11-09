@@ -7,7 +7,8 @@ interface Stats { trades: number; win_rate: number; avg_trade: number; profit_fa
 interface Variant extends Stats { name: string; yearly: Record<string, number>; holdout: Stats | null; equity: { date: string; value: number }[] }
 interface LlmBucket { n: number; win_rate: number; avg_ret: number }
 interface Research {
-  from: string; to: string; split: string; target_atr: number; stop_atr: number; rubric_min: number; variants: Variant[];
+  from: string; to: string; split: string; target_atr: number; stop_atr: number; breadth_min: number;
+  survivorship_free?: boolean; symbols?: number; cost?: number; variants: Variant[];
   llm_test?: { n: number; base_win_rate: number; auc: number | null } & Record<string, LlmBucket | number | null>;
 }
 
@@ -51,7 +52,10 @@ export default function LongTermBacktest() {
         <div className="text-sm font-semibold text-white">22-year walk-forward ({r.from.slice(0, 4)} → {r.to.slice(0, 4)})</div>
         <p className="text-xs text-zinc-400 mt-1">
           Every year is traded by a model trained only on earlier years. Live setting: target {r.target_atr}× ATR, stop {r.stop_atr}× ATR,
-          long trades only when Nifty is above its 200-day average, and rule-based rubric ≥ {r.rubric_min}. Thresholds were chosen on data
+          top 2% of the ML ranking, only when more than {Math.round(r.breadth_min * 100)}% of stocks are above their 50-day average.
+          Bought at the next day&apos;s open with gap fills, {((r.cost ?? 0.003) * 100).toFixed(1)}% cost per trade.
+          {r.survivorship_free && <> Universe: the {r.symbols} stocks that were in the top 500 at the time, including later-delisted ones.</>}
+          {" "}Rules were chosen on data
           before {r.split.slice(0, 4)}; the &quot;since {r.split.slice(0, 4)}&quot; column is the out-of-sample check.
         </p>
       </div>

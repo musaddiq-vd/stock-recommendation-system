@@ -6,7 +6,7 @@ import { inr, positionSize, Settings } from "@/lib/sizing";
 import { GATE_HINT } from "./PickCard";
 
 type Candle = { time: string; open: number; high: number; low: number; close: number; volume: number };
-// rule-based rubric validated on 22 years (see app/research/rubric_proxy.py)
+// rule-based rubric, shown for context only (it did not improve the survivorship-free backtest)
 const RUBRIC_MAX: Record<string, number> = { structure: 20, momentum: 15, volume: 15, risk_reward: 10 };
 
 export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }: {
@@ -87,7 +87,7 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 text-sm">
           <Stat k="Final score" v={pick.score.toFixed(0)} />
-          <Stat k="Rubric (validated)" v={pick.rubric_score != null ? `${pick.rubric_score}/100` : "–"} />
+          <Stat k="Market breadth gate" v={pick.gates?.breadth === undefined ? "–" : pick.gates.breadth ? "pass" : "fail"} />
           <Stat k="ML rank" v={`Top ${Math.max(1, 100 - pick.ml_percentile)}%`} />
           <Stat k="Target-hit rate*" v={`${(pick.hist_win_rate * 100).toFixed(0)}%`} />
         </div>
@@ -124,7 +124,7 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
         </div>
 
         {pick.rubric_parts && (
-          <Section title={`Rule-based rubric: ${pick.rubric_score}/100 (validated on 22 years, needs ≥ 70)`}>
+          <Section title={`Price-structure rubric: ${pick.rubric_score}/100 (context only, not a gate)`}>
             <div className="space-y-1.5">
               {Object.entries(pick.rubric_parts).map(([k, v]) => {
                 const max = RUBRIC_MAX[k] ?? 15;
@@ -144,7 +144,7 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
         )}
 
         {pick.gates && (
-          <Section title="Gates (all must pass for Top tier)">
+          <Section title="Gates (all must pass for Buy)">
             <ul className="text-xs space-y-1">
               {Object.entries(pick.gates).map(([g, ok]) => (
                 <li key={g} className={ok ? "text-emerald-300" : "text-zinc-500"}>{ok ? "✓" : "✗"} <b>{g}</b>: {GATE_HINT[g]}</li>
@@ -209,7 +209,8 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
           </Section>
         )}
         <p className="text-[11px] text-zinc-500 mt-6">
-          * Share of similar ML signals that reached the full target before the stop within 20 days (out-of-sample).
+          * Share of similar ML signals in the last 12 months that reached the full target before the stop within 20 days,
+          bought at the next open. The rest ended at the stop or at the 20-day limit (often still in profit).
           For education only, not financial advice.
         </p>
       </div>

@@ -24,7 +24,7 @@ export interface Pick {
   official_event?: { purpose: string; date: string; desc: string } | null;
   rubric_score?: number;
   rubric_parts?: Record<string, number>;
-  gates?: { regime: boolean; rubric: boolean; agent?: boolean };
+  gates?: Record<string, boolean>; // current: ml_top, breadth, agent (older scans: regime, rubric, agent)
   as_of: string;
   ml_prob: number;
   ml_percentile: number;
@@ -47,6 +47,7 @@ export interface Market {
   regime: "bullish" | "neutral" | "bearish";
   date: string;
   flows?: { date?: string; fii?: number; dii?: number; fii_5d?: number; dii_5d?: number; days_tracked?: number };
+  breadth50?: number;
 }
 
 export interface Scan {
@@ -127,7 +128,7 @@ export const TIER_STYLE: Record<Tier, { card: string; badge: string; label: stri
   strong: {
     card: "border-emerald-500 bg-emerald-950/60 shadow-[0_0_24px_-6px_rgba(16,185,129,0.6)]",
     badge: "bg-emerald-500 text-black",
-    label: "Top tier",
+    label: "Buy",
   },
   good: { card: "border-emerald-700/70 bg-emerald-950/25", badge: "bg-emerald-800 text-emerald-100", label: "Good" },
   watch: { card: "border-zinc-700 bg-zinc-900/60", badge: "bg-zinc-700 text-zinc-200", label: "Watch" },
@@ -141,6 +142,5 @@ export type TierStats = Partial<Record<Tier, TierStat>>;
 export function tierStatsFrom(research: { variants?: (TierStat & { name: string })[] } | null): TierStats {
   const v = research?.variants || [];
   const live = v.find((x) => x.name.includes("live setting"));
-  const good = v.find((x) => x.name.includes("Good tier"));
-  return { ...(live ? { strong: live } : {}), ...(good ? { good } : {}) };
+  return live ? { strong: live } : {};
 }

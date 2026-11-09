@@ -19,12 +19,13 @@ interface Track {
   version: string;
   earlier_version_picks: number;
   tiers: Record<string, TierRecord>;
+  agent_check?: Partial<Record<"cleared" | "vetoed", TierRecord>>;
   recent: { symbol: string; as_of: string; tier: string; outcome: string; outcome_ret: number | null; outcome_days: number | null }[];
 }
 
 const pct = (v: number | null | undefined, d = 1) => (v == null ? "–" : `${v > 0 ? "+" : ""}${(v * 100).toFixed(d)}%`);
-const TIER_ORDER = ["strong", "good", "watch", "avoid"];
-const TIER_NAME: Record<string, string> = { strong: "Top tier", good: "Good", watch: "Watch", avoid: "Avoid" };
+const TIER_ORDER = ["strong", "watch", "avoid"];
+const TIER_NAME: Record<string, string> = { strong: "Buy", good: "Good (older rules)", watch: "Watch", avoid: "Avoid" };
 
 export default function BacktestPanel() {
   const [s, setS] = useState<Report | null | undefined>(undefined);
@@ -46,7 +47,7 @@ export default function BacktestPanel() {
           <p className="text-xs text-zinc-400">
             Out-of-sample test: <b>{s.test_from} → {s.test_to}</b> (data the model never saw during training). Portfolio: max {s.portfolio.slots} positions,
             {" "}{Math.round(100 / s.portfolio.slots)}% of capital per trade, ML probability ≥ {s.portfolio.threshold} (top 2% signals), {(s.portfolio.cost * 100).toFixed(1)}% cost per trade.
-            The rubric, regime and agent gates are not applied here; the 22-year section above shows their effect.
+            Today&apos;s Nifty 500 only (survivors) and no breadth or agent gates; the 22-year section above is the honest test.
           </p>
           <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
             <Box k="Strategy return" v={pct(s.portfolio.total_return)} good={s.portfolio.total_return >= 0} />
@@ -98,6 +99,28 @@ function TrackRecord({ t }: { t: Track | null }) {
               </div>
             );
           })}
+        </div>
+      )}
+      {t.agent_check && (t.agent_check.cleared || t.agent_check.vetoed) && (
+        <div className="rounded-lg border border-zinc-800 p-3 text-xs">
+          <div className="text-zinc-200 font-semibold">Agent veto check</div>
+          <div className="text-zinc-500 mt-0.5">
+            Picks that passed the ML and breadth gates: does the agent&apos;s veto actually avoid losers?
+            The veto earns its place only if vetoed picks do clearly worse than cleared ones over many trades.
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            {(["cleared", "vetoed"] as const).map((k) => {
+              const r = t.agent_check?.[k];
+              return (
+                <div key={k} className="rounded bg-zinc-900 px-2 py-1.5">
+                  <div className="text-zinc-300">{k === "cleared" ? "Agent cleared" : "Agent vetoed"}</div>
+                  <div className="text-zinc-400">
+                    {r ? <>{r.closed} closed · {r.open} open{r.closed ? <> · profitable {(r.win_rate! * 100).toFixed(0)}% · avg {pct(r.avg_ret, 1)}</> : null}</> : "none yet"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
       {t.recent.length > 0 && (

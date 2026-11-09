@@ -3,8 +3,10 @@ import { Pick, TIER_STYLE, TierStat } from "@/lib/api";
 import { inr, positionSize, Settings } from "@/lib/sizing";
 
 export const GATE_HINT: Record<string, string> = {
-  regime: "Nifty above its 200-day average (cut max drawdown from -64% to -18% over 22 years)",
-  rubric: "Rule-based rubric score ≥ 70 (validated on 22 years)",
+  ml_top: "In the top 2% of the daily ML ranking of ~480 stocks",
+  breadth: "More than half of the market's stocks are above their 50-day average (cut the worst drawdown from -66% to -25%)",
+  regime: "Nifty above its 200-day average (older scans)",
+  rubric: "Rule-based rubric score ≥ 70 (older scans)",
   agent: "Research agent found no red flags, no negative news and no results inside the holding window",
 };
 
@@ -49,7 +51,7 @@ export default function PickCard({ p, onOpen, settings, stat }: {
 
       {stat && (
         <div className="mt-2 text-[11px] text-emerald-200/90" title="22-year walk-forward result of picks in this tier, after 0.2% costs">
-          Past 22 yrs, this tier: {(stat.win_rate * 100).toFixed(0)}% trades profitable · profit factor {stat.profit_factor}{" "}
+          22-yr test incl. delisted stocks: {(stat.win_rate * 100).toFixed(0)}% trades profitable · profit factor {stat.profit_factor}{" "}
           · worst drawdown {(stat.max_dd * 100).toFixed(0)}%
         </div>
       )}
@@ -74,7 +76,6 @@ export default function PickCard({ p, onOpen, settings, stat }: {
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-[11px] text-zinc-400">
         <span>ML top {Math.max(1, 100 - p.ml_percentile)}%</span>
-        {p.rubric_score != null && <span>Rubric {p.rubric_score}</span>}
         {p.gates && (
           <span className="flex gap-1">
             {Object.entries(p.gates).map(([g, ok]) => (

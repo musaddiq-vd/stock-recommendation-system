@@ -192,7 +192,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
         <div className="px-6 py-5 space-y-5">
           {market?.regime === "bearish" && (
             <div className="rounded-lg border border-red-900 bg-red-950/30 px-4 py-2 text-sm text-red-200">
-              ⚠ Nifty is below its 200-day average (bearish regime). Scores are penalised; use smaller position sizes.
+              ⚠ Nifty is below its 200-day average (bearish regime). Be extra careful with position sizes.
             </div>
           )}
 
@@ -200,11 +200,12 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-zinc-400">
                 Scan #{scan.id} · {scan.universe}{scan.sector ? ` · ${scan.sector}` : ""} · {scan.created_at.replace("T", " ")}
+                {scan.market?.breadth50 != null && <> · breadth {Math.round(scan.market.breadth50 * 100)}% {scan.market.breadth50 > 0.5 ? "✓" : "(below 50%: no Buy calls)"}</>}
               </span>
               <span className="flex-1" />
-              {(["all", "strong", "good", "watch", "avoid"] as const).map((t) => (
+              {(["all", "strong", "watch", "avoid"] as const).map((t) => (
                 <button key={t} onClick={() => setTierFilter(t)} className={`rounded-full px-3 py-1 text-xs border ${tierFilter === t ? "border-emerald-500 text-emerald-300" : "border-zinc-800 text-zinc-400"}`}>
-                  {t === "all" ? `All (${Object.values(counts).reduce((a, b) => a + b, 0)})` : `${t} (${counts[t] || 0})`}
+                  {t === "all" ? `All (${Object.values(counts).reduce((a, b) => a + b, 0)})` : `${t === "strong" ? "buy" : t} (${counts[t] || 0})`}
                 </button>
               ))}
             </div>
@@ -238,15 +239,15 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
 
           <div className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-400">
             <div className="flex flex-wrap gap-3">
-              <Legend cls="bg-emerald-500" t="Top tier: score ≥ 85 and every gate passes (regime, rubric, agent)" />
-              <Legend cls="bg-emerald-800" t="Good: score ≥ 72, agent clear, Nifty above its 200-day average" />
+              <Legend cls="bg-emerald-500" t="Buy: top 2% ML rank, market breadth > 50%, agent clear" />
               <Legend cls="bg-zinc-700" t="Watch" />
               <Legend cls="bg-red-800" t="Avoid: confirmed red flag" />
             </div>
             {tierStats.strong && (
               <div className="mt-2">
-                Over 22 years of walk-forward tests, Top-tier trades closed in profit {(tierStats.strong.win_rate * 100).toFixed(0)}% of the
-                time with a profit factor of {tierStats.strong.profit_factor}. Expect losing trades; size every position with the stop-loss in mind.
+                In a 22-year test that includes delisted stocks, Buy-rule trades closed in profit {(tierStats.strong.win_rate * 100).toFixed(0)}% of the
+                time with a profit factor of {tierStats.strong.profit_factor}: a modest edge. Expect many losing trades; size every position with
+                the stop-loss in mind.
               </div>
             )}
             <div className="mt-2 text-zinc-500">Educational tool, not financial advice. Past results do not guarantee future returns.</div>
