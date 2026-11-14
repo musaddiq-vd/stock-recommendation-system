@@ -32,6 +32,12 @@ export interface Pick {
   hist_avg_ret: number;
   score: number;
   tier: Tier;
+  // what happened to past walk-forward signals with the same ML rank and market state (observed rates, not a promise)
+  odds?: {
+    label: string; gate_open: boolean; signals: number; win: number; target: number; avg_ret: number;
+    avg_win: number; avg_loss: number; avg_days: number; recent_win: number | null; from: string; to: string;
+  } | null;
+  top_pick?: boolean; // the day's single best stock the research agent cleared (a Buy only if tier is "strong")
   hold_days: string;
   levels: { entry: number; target: number; stop_loss: number; target_pct: number; stop_pct: number };
   technicals: Record<string, number | string>;

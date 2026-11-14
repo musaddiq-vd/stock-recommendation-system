@@ -33,14 +33,14 @@ researches each one with LLM agents, and tracks every call against real market d
 
 | | |
 |---|---|
-| **Stock detail:** chart with entry / target / stop, risk-based size, rubric and the three Buy checks | **Research chat:** reads the latest scan, says when there is no Buy call and why |
+| **Stock detail:** chance of winning from similar past signals, chart with entry / target / stop, risk-based size and rubric | **Research chat:** reads the latest scan, says when there is no Buy call and why |
 | <img src="docs/screenshots/stock-detail.png" alt="Stock detail drawer"/> | <img src="docs/screenshots/chat.png" alt="Research chat answer"/> |
 | **Sector heatmap:** tiles sized by turnover; click a sector to see its stocks | **Rotation map:** which sectors are leading, weakening, lagging or improving vs the market |
 | <img src="docs/screenshots/heatmap-tiles.png" alt="Sector heatmap tiles"/> | <img src="docs/screenshots/rotation-map.png" alt="Sector rotation map"/> |
 | **Backtest:** live track record and the 22-year survivorship-free walk-forward | **Mobile:** the same dashboard on a phone, chat behind a button |
 | <img src="docs/screenshots/backtest.png" alt="Backtest tab"/> | <img src="docs/screenshots/mobile.png" alt="Mobile view" width="60%"/> |
 
-<sub>Screenshots from a local run on 9 Nov 2026, when the market gate was closed (no Buy calls that day). Market data only; not advice.</sub>
+<sub>Dashboard, stock detail, backtest and mobile: local run on 14 Nov 2026 (market gate open, 9 Buy calls). Chat, heatmap and rotation map: 9 Nov 2026, when the gate was closed. Market data only; not advice.</sub>
 
 ---
 
@@ -52,6 +52,7 @@ researches each one with LLM agents, and tracks every call against real market d
 | 🌡️ | **Market gate** | Buy calls only when Nifty and more than half of the market's stocks are above their 200-day averages; this cut the worst drawdown from −65% to −21% in the honest backtest. |
 | 🤖 | **Research agent** | For the top candidates, an LLM agent (AWS Bedrock) reads news, filings, fundamentals and official NSE event dates, and can veto a pick for red flags, negative news or results inside the holding window. |
 | 🟢 | **One honest Buy tier** | A stock is a green **Buy** only when all three checks pass: top 2% of the daily ML ranking, market gate open, research agent clear. Everything else is **Watch** or **Avoid**, never a buy. |
+| 🎯 | **Chance of profit on every pick** | Each card shows what happened to past signals with the same ML rank and market state: how often they closed in profit, how often they reached the full target, the average win and loss and the average holding time. These are observed frequencies from the 22-year walk-forward, not a promise for one trade. |
 | 🧭 | **Market context** | Nifty regime (bullish / neutral / bearish), FII/DII net flows and a sector **money-flow heatmap**. |
 | 📐 | **Position sizing** | Risk-based sizing for Buy calls: lose at most your risk % of capital if the stop hits, never invest more than your capital. Shows shares, capital used, max loss and target profit. |
 | 📝 | **Paper trading** | Open virtual trades from any pick. They auto-close at target, stop or the 20-day timeout, with live P&L. |
@@ -60,7 +61,8 @@ researches each one with LLM agents, and tracks every call against real market d
 | 📈 | **Live track record** | Real outcomes of the app's own past picks (target, stop or 20-day exit), per tier. |
 | 📊 | **Backtest dashboard** | Out-of-sample equity curve vs Nifty, drawdown chart, monthly returns and a feature-set comparison. |
 | 💬 | **Research chat** | Ask about any stock or sector. The chat uses the same live tools and the latest scan, only calls Buy-tier picks a buy, sizes positions by your risk setting and never invents price levels. |
-| ⏰ | **Automation** | Daily scan after market close, intraday target/stop checks every 15 minutes, monthly model retraining. |
+| ⏰ | **Automation** | Daily scan after market close (it waits and retries until the day's bars are published, and catches up on startup if the app was off), intraday target/stop checks every 15 minutes, monthly model retraining. |
+| 🥇 | **Top pick of the day** | Each scan flags the single highest-ranked stock the research agent cleared, judged only on that session's finished bars. It is labelled Buy only when all three checks pass; otherwise it is a Watch. |
 
 ---
 
@@ -135,6 +137,24 @@ touched in one bar, the stop is assumed to hit first. Trades last ~13 sessions o
   up in later years), a rule-based price-structure rubric as a gate (still shown on each pick for context), a cap of
   2 Buys per sector, breakeven / trailing stops (they cut the win rate to 30–45% without a consistent gain), and a
   LightGBM ranking model or return regressor instead of the classifier (worse profit factor and twice the drawdown).
+- **Second round, also dropped** (Nov 2026, same honest test):
+  - *Training recipes* (`model_lab`): seed bagging, three models on different thirds of the days, training on the last
+    10 years only, time-decay weights (3 / 5 / 8-year half-life), slower and more regularised trees, and a "closed in
+    profit" label. Time decay looked best in one run (profit factor 1.51 vs 1.37), but over five seeds each it averaged
+    1.42 against 1.38 with a deeper drawdown after 2016, so it is not a real gain.
+  - *13 more chart features* (`feature_lab2`): overnight-gap vs intraday returns, money on up days, Amihud illiquidity,
+    beta, idiosyncratic volatility, biggest daily jump, skew, 3-day pullback, 20-day breakout distance, range squeeze,
+    inside days, and market breadth as a model input. No group beat the current features in both periods.
+  - *Exits* (`trade_lab`): 10 and 15-day limits, 3.0/2.0, 3.0/2.5, 4.0/2.5 and 3.5/2.0 ATR brackets, and selling on
+    day 5 / 10 / 15 when the trade is not in profit. The 3.5/2.5 bracket with a 20-day limit stayed best or equal;
+    early selling cut profitable trades from 52% to 38–48%.
+  - *Softer market gate* (`trade_lab`): half-size trades when only one of the two gate conditions holds scored a
+    profit factor of 1.32–1.46 before 2016 against 1.56 for the full gate. No gate at all: worst drawdown −67%.
+- **How big is luck?** Retraining the same model with a different random seed moves the 19-year profit factor by
+  about ±0.04 (1.37 to 1.45 across six runs), and more within one sub-period. A change has to beat that range across
+  several seeds before it is adopted; a single better backtest is not evidence.
+- **Not testable with free data:** fundamentals, promoter / FII holdings and bulk deals have no free point-in-time
+  history that includes delisted stocks, so they are left to the research agent instead of being put in the model.
 - **Added after testing** (`python -m app.research.feature_lab`): the 11 newer features above raised the live rule's
   profit factor from 1.50 to 1.66 on 2005–2015 data, where they were chosen, and from 1.30 to 1.34 on 2016–2026,
   with the worst drawdown down from −23% to −20%. Picks scored with them carry scoring version 9.
@@ -212,12 +232,15 @@ flowchart TB
 ### What happens in a scan
 1. **Market check:** Nifty vs its 200-day average, plus breadth (share of liquid stocks above their own 200-day average).
 2. **Score everything:** features for ~480 Nifty 500 stocks from the cached daily bars, then the LightGBM probability
-   and each stock's rank that day (`xs_pct`). Stale or suspended stocks are dropped.
-3. **Pick candidates:** the top N by ML rank inside the chosen index (and sector), liquid stocks only.
+   and each stock's rank that day (`xs_pct`). Stale or suspended stocks are dropped. Only finished sessions are
+   cached: an unfinished intraday bar from Yahoo is never stored as the day's close.
+3. **Pick candidates:** the top N by ML rank inside the chosen index (and sector), liquid stocks with a bar for the
+   latest session only.
 4. **Research in parallel:** 4 agent threads call Bedrock with tools (technicals, fundamentals, news, web search,
    NSE event calendar) and return strict JSON; official NSE event dates override the agent.
 5. **Judge:** three checks (ML top 2%, market gate, agent clear) give the tier: **Buy** only if all pass.
-6. **Save and notify:** picks are stored with the scoring version and entry/target/stop; Buy calls go to Telegram.
+6. **Save and notify:** picks are stored with the scoring version, entry/target/stop and the chance of profit of
+   similar past signals; the best stock the agent cleared is flagged as the day's top pick; Buy calls go to Telegram.
    Progress streams to the dashboard while the scan runs; a failure is recorded and sent as an ops alert.
 
 After a scan, the intraday job checks open picks and paper trades every 15 minutes, and outcomes (target, stop,
@@ -231,7 +254,7 @@ After a scan, the intraday job checks open picks and paper trades every 15 minut
 | `nse/` | Bhavcopy delivery data, FII/DII flows | Daily job |
 | `universe/` | Nifty 50/100/500 lists (refreshed weekly) | On demand |
 | `model.joblib`, `model_report.json` | Live model, its feature list and holdout report | Monthly retrain |
-| `research/` | Point-in-time prices, datasets and walk-forward reports | Research commands |
+| `research/` | Point-in-time prices, datasets, walk-forward reports and `odds.json` (chance-of-profit table) | Research commands |
 
 All of it is git-ignored; back up the volume to keep the history and paper trades.
 
@@ -251,17 +274,17 @@ All of it is git-ignored; back up the volume to keep the history and paper trade
 
 ### Survivorship-free 22-year walk-forward (2005 → 2026)
 Testing only today's Nifty 500 hides every company that later collapsed or was delisted. This test rebuilds the
-universe month by month from NSE's daily bhavcopies (**2,165 stocks** that were in the top 500 by traded value at the time,
+universe month by month from NSE's daily bhavcopies (**2,163 stocks** that were in the top 500 by traded value at the time,
 including later-delisted ones), adjusts prices for splits and bonuses, and retrains the model every year on earlier data
 only. Entries are at the next day's open with gap fills, 0.3% cost per trade, 10-slot portfolio. Rules were chosen on data
 before 2016; 2016–2026 is the out-of-sample check.
 
 | Strategy | Trades | Profitable | Profit factor | Worst drawdown | 2016+ profit factor |
 |---|---:|---:|---:|---:|---:|
-| Random pick, same universe | 3,850 | 46.4% | 1.03 | −78% | 1.10 |
-| ML top 2% | 4,355 | 50.4% | 1.28 | −65% | 1.27 |
-| ML top 2% + Nifty > 200-day average | 2,996 | 50.9% | 1.31 | −37% | 1.20 |
-| ML top 2% + 50-day breadth > 50% | 2,994 | 52.0% | 1.38 | −35% | 1.28 |
+| Random pick, same universe | 3,852 | 46.5% | 1.04 | −78% | 1.01 |
+| ML top 2% | 4,357 | 50.3% | 1.27 | −65% | 1.25 |
+| ML top 2% + Nifty > 200-day average | 2,995 | 50.9% | 1.31 | −37% | 1.19 |
+| ML top 2% + 50-day breadth > 50% | 2,994 | 52.0% | 1.38 | −35% | 1.27 |
 | **ML top 2% + Nifty & 200-day breadth (live rule)** | **2,432** | **52.0%** | **1.46** | **−21%** | **1.34** |
 
 With the scoring version 8 features (before the 11 newer ones) the live rule scored 51.6%, profit factor 1.38 and
@@ -292,6 +315,10 @@ python -m app.research.v2 export pit    # numbers shown in the dashboard's Backt
 python -m app.research.exits pit        # sector caps, breakeven and trailing stops
 python -m app.research.training_data      # train on survivors vs point-in-time: which ranks better?
 python -m app.research.feature_lab extra   # candidate features (then: feature_lab run)
+python -m app.research.v2 odds pit        # chance-of-profit table shown on each pick
+python -m app.research.model_lab          # training recipes (then: model_lab seeds, for the luck range)
+python -m app.research.feature_lab2 extra # second round of chart features (then: feature_lab2 run)
+python -m app.research.trade_lab          # exit rules and graded market gates
 ```
 The same pipeline runs on today's Nifty 500 with `yahoo` instead of `pit` (after `python -m app.research.history`).
 
@@ -302,15 +329,15 @@ on the point-in-time universe, ML top 2% only (no market or agent gate), next-op
 
 | Long model | Value |
 |---|---:|
-| Target-hit rate, random stock | 22.4% |
-| Target-hit rate, top ML signals | 23.8–26.1% |
-| Portfolio return (10 slots, top 2% signals) | +1.3% |
-| Nifty 50, same period | −10.6% |
-| Profitable trades after costs | 44.4% |
-| Max drawdown | −15.7% |
+| Target-hit rate, random stock | 22.3% |
+| Target-hit rate, top ML signals | 23.0–23.4% |
+| Portfolio return (10 slots, top 2% signals) | −4.4% |
+| Nifty 50, same period | −9.5% |
+| Profitable trades after costs | 43.7% |
+| Max drawdown | −18.3% |
 | Holdout AUC | 0.51 |
 
-A weak year for the model on its own: it stayed roughly flat (+1.3%) while Nifty fell 10.6%. The market gate, which keeps the
+A weak year for the model on its own: it lost 4.4% while Nifty fell 9.5%. The market gate, which keeps the
 app out of most such periods, is not applied here; one year is too short to judge, so the 22-year test above is the
 reference.
 

@@ -109,6 +109,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
     return c;
   }, [scan]);
   const running = scan?.status === "running" || scanId !== null;
+  const topPick = scan?.status === "done" ? scan.picks.find((p) => p.top_pick && p.side !== "short") : undefined;
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -224,6 +225,32 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
             </div>
           )}
           {scan?.status === "error" && <div className="text-red-400 text-sm">Scan failed: {scan.error}</div>}
+
+          {topPick && (
+            <button
+              onClick={() => setOpen(topPick)}
+              className={`w-full text-left rounded-xl border p-4 hover:bg-zinc-900/60 ${topPick.tier === "strong" ? "border-emerald-600 bg-emerald-950/20" : "border-zinc-700 bg-zinc-900/40"}`}
+            >
+              <div className="text-xs uppercase tracking-wide text-zinc-400">Top pick for {topPick.as_of}</div>
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="text-lg font-bold text-white">{topPick.symbol}</span>
+                <span className="text-sm text-zinc-400">{topPick.name} · {topPick.sector}</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${topPick.tier === "strong" ? "bg-emerald-600 text-white" : "bg-zinc-700 text-zinc-200"}`}>
+                  {topPick.tier === "strong" ? "Buy" : "Watch"}
+                </span>
+              </div>
+              <div className="mt-1 text-sm text-zinc-300">
+                ML top {Math.max(1, 100 - topPick.ml_percentile)}% today · entry ₹{topPick.levels.entry} · target ₹{topPick.levels.target} · stop ₹{topPick.levels.stop_loss}
+              </div>
+              <div className="mt-1 text-xs text-zinc-500">
+                {topPick.tier === "strong"
+                  ? "Highest-ranked stock that passed all three checks."
+                  : `Highest-ranked stock the research agent cleared, but not a Buy: ${
+                      topPick.gates && !topPick.gates.market ? "the market gate is closed" : "it is not in the top 2% of the ML ranking"
+                    }. Shown for research only.`}
+              </div>
+            </button>
+          )}
 
           {picks.length > 0 ? (
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

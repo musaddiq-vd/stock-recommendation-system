@@ -16,10 +16,12 @@ from .experiment import portfolio
 from .v2 import COST_REAL, HORIZON, OUT, SPLIT, STOP, TARGET, _benchmark, _sources
 
 
-def managed_outcomes(o, h, l, c, atr, target_atr, stop_atr, horizon, be_at=None, trail=None):
+def managed_outcomes(o, h, l, c, atr, target_atr, stop_atr, horizon, be_at=None, trail=None, time_stop=None):
     """Like features.next_open_outcomes, plus stop management decided at each close for the next bar:
     be_at: once the high reaches entry + be_at x ATR, the stop moves up to the entry (breakeven).
-    trail: the stop follows the highest high minus trail x ATR (never moves down)."""
+    trail: the stop follows the highest high minus trail x ATR (never moves down).
+    time_stop: (day, gain_atr): if on that day the close is below entry + gain_atr x ATR, sell at that close
+    (the trade is not working, free the slot)."""
     o, h, l, c, atr = (np.asarray(x, dtype=float) for x in (o, h, l, c, atr))
     n = len(c)
     entry = np.full(n, np.nan)
@@ -40,6 +42,13 @@ def managed_outcomes(o, h, l, c, atr, target_atr, stop_atr, horizon, be_at=None,
             ret[mask] = price[mask] / entry[mask] - 1
             days[mask] = j
         open_ &= ~(gap_stop | stop_hit | gap_tgt | tgt_hit)
+        if time_stop is not None and j == time_stop[0]:
+            cj = np.full(n, np.nan)
+            cj[: n - j] = c[j:]
+            weak = open_ & (cj < entry + time_stop[1] * atr)
+            ret[weak] = cj[weak] / entry[weak] - 1
+            days[weak] = j
+            open_ &= ~weak
         hi = np.where(open_, np.fmax(hi, hj), hi)
         if be_at is not None:
             stp = np.where(open_ & (hi >= entry + be_at * atr), np.fmax(stp, entry), stp)

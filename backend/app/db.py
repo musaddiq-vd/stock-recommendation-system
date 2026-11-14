@@ -76,7 +76,7 @@ def get_scan(scan_id):
         if not r:
             return None
         scan = _scan_row(r)
-        rows = c.execute("SELECT * FROM picks WHERE scan_id=? ORDER BY score DESC", (scan_id,)).fetchall()
+        rows = c.execute("SELECT * FROM picks WHERE scan_id=? ORDER BY id", (scan_id,)).fetchall()
     scan["picks"] = [{**json.loads(p["data"]), "outcome": p["outcome"], "outcome_ret": p["outcome_ret"]} for p in rows]
     return scan
 

@@ -89,8 +89,31 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
           <Stat k="Final score" v={pick.score.toFixed(0)} />
           <Stat k="Market gate" v={pick.gates?.market === undefined ? "–" : pick.gates.market ? "open" : "closed"} />
           <Stat k="ML rank" v={`Top ${Math.max(1, 100 - pick.ml_percentile)}%`} />
-          <Stat k="Target-hit rate*" v={`${(pick.hist_win_rate * 100).toFixed(0)}%`} />
+          {pick.odds ? (
+            <Stat k="Holding limit" v={`${pick.hold_days.split("-").pop()} trading days`} />
+          ) : (
+            <Stat k="Target-hit rate*" v={`${(pick.hist_win_rate * 100).toFixed(0)}%`} />
+          )}
         </div>
+
+        {pick.odds && (
+          <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 text-sm">
+            <div className="font-semibold text-zinc-200">Chance of winning this trade</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2">
+              <Stat k="Closed in profit" v={`${(pick.odds.win * 100).toFixed(0)}%`} cls="text-emerald-400" />
+              <Stat k="Reached full target" v={`${(pick.odds.target * 100).toFixed(0)}%`} />
+              <Stat k="Avg win / avg loss" v={`+${(pick.odds.avg_win * 100).toFixed(1)}% / ${(pick.odds.avg_loss * 100).toFixed(1)}%`} />
+              <Stat k="Avg holding" v={`${Math.round(pick.odds.avg_days)} days`} />
+            </div>
+            <p className="mt-2 text-xs text-zinc-500">
+              Observed on {pick.odds.signals.toLocaleString("en-IN")} past signals ({pick.odds.from.slice(0, 4)}–{pick.odds.to.slice(0, 4)}, delisted stocks
+              included) with the same ML rank ({pick.odds.label}) and the market gate {pick.odds.gate_open ? "open" : "closed"}, each scored by a model
+              that had not seen it. Next-open entry, same target and stop, 0.3% cost.
+              {pick.odds.recent_win != null && <> Since 2016: {(pick.odds.recent_win * 100).toFixed(0)}% closed in profit.</>} Past frequencies, not a
+              promise for this trade.
+            </p>
+          </div>
+        )}
 
         <div ref={ref} className="mt-4 w-full h-[320px]" />
 
@@ -214,8 +237,12 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
           </Section>
         )}
         <p className="text-[11px] text-zinc-500 mt-6">
-          * Share of similar ML signals in the last 12 months that reached the full target before the stop within 20 days,
-          bought at the next open. The rest ended at the stop or at the 20-day limit (often still in profit).
+          {!pick.odds && (
+            <>
+              * Share of similar ML signals in the last 12 months that reached the full target before the stop within 20 days,
+              bought at the next open. The rest ended at the stop or at the 20-day limit (often still in profit).{" "}
+            </>
+          )}
           For education only, not financial advice.
         </p>
       </div>

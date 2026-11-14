@@ -116,7 +116,9 @@ def portfolio(sig: pd.DataFrame, rcol: str, dcol: str, slots: int = 10, cost: fl
     `calendar` must list every trading day: holding periods are counted in sessions, and days without
     signals still pass (without it only signal days are counted, which keeps trades open too long when a
     filter removes whole weeks). `max_per_sector` caps open positions per sector ("Other" is not capped)."""
-    cols = ["date", "symbol", "prob", rcol, dcol] + (["sector"] if "sector" in sig else [])
+    # optional column size_: fraction of a normal slot for this trade (graded market gate)
+    cols = (["date", "symbol", "prob", rcol, dcol] + (["sector"] if "sector" in sig else [])
+            + (["size_"] if "size_" in sig else []))
     sig = (sig[cols].rename(columns={rcol: "ret_", dcol: "days_"})
            .sort_values(["date", "prob"], ascending=[True, False]))
     rcol, dcol = "ret_", "days_"
@@ -145,7 +147,7 @@ def portfolio(sig: pd.DataFrame, rcol: str, dcol: str, slots: int = 10, cost: fl
                 sector = getattr(r, "sector", "Other") or "Other"
                 if max_per_sector and sector != "Other" and                         sum(p["sector"] == sector for p in open_pos) >= max_per_sector:
                     continue
-                alloc = equity / slots
+                alloc = equity / slots * float(getattr(r, "size_", 1.0))
                 cash -= alloc
                 open_pos.append({"symbol": r.symbol, "alloc": alloc, "ret": float(getattr(r, rcol)), "sector": sector,
                                  "exit_i": i + max(1, int(getattr(r, dcol)))})

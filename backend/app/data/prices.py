@@ -3,6 +3,7 @@ import datetime as dt
 import logging
 import threading
 import warnings
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -22,9 +23,17 @@ def _path(symbol: str):
     return PRICE_DIR / f"{symbol.replace('^', 'IDX_').replace('&', '_')}.parquet"
 
 
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def ist_now() -> dt.datetime:
+    """Current Indian time as a naive datetime, whatever the server's own timezone (Docker runs on UTC)."""
+    return dt.datetime.now(IST).replace(tzinfo=None)
+
+
 def expected_last_bar(now: dt.datetime | None = None) -> dt.date:
     """Latest session whose daily bar should exist: today after 16:00 IST, else the previous weekday."""
-    now = now or dt.datetime.now()
+    now = now or ist_now()
     d = now.date() if now.hour >= 16 else now.date() - dt.timedelta(days=1)
     while d.weekday() >= 5:
         d -= dt.timedelta(days=1)
@@ -32,12 +41,13 @@ def expected_last_bar(now: dt.datetime | None = None) -> dt.date:
 
 
 def _fresh(path) -> bool:
-    """Fresh if it already has the expected latest bar, or was refreshed in the last 2 hours
-    (covers NSE holidays, when no new bar will appear)."""
+    """Fresh if it already has the expected latest bar, or was refreshed in the last 20 minutes
+    (covers NSE holidays, when no new bar will appear). The window is short so that when Yahoo publishes
+    the day's bars late, the daily job's 30-minute retries really download again."""
     if not path.exists():
         return False
     mtime = dt.datetime.fromtimestamp(path.stat().st_mtime)
-    if dt.datetime.now() - mtime < dt.timedelta(hours=2):
+    if dt.datetime.now() - mtime < dt.timedelta(minutes=20):
         return True
     try:
         last = pd.read_parquet(path, columns=["close"]).index[-1].date()
@@ -57,7 +67,12 @@ def _clean(df: pd.DataFrame, daily: bool = True) -> pd.DataFrame:
     if idx.tz is not None:  # Ticker.history returns IST-aware timestamps; keep the local date
         idx = idx.tz_convert("Asia/Kolkata").tz_localize(None)
     df.index = idx.normalize() if daily else idx
-    return df.dropna(subset=["close"])
+    df = df.dropna(subset=["close"])
+    if daily:
+        # During market hours Yahoo returns today's unfinished bar. Caching it would make the evening scan
+        # read a mid-day snapshot as the close (the file then looks fresh), so keep finished sessions only.
+        df = df[df.index <= pd.Timestamp(expected_last_bar())]
+    return df
 
 
 _refresh_lock = threading.Lock()

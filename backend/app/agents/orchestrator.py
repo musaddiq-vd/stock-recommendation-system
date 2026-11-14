@@ -16,7 +16,7 @@ from .. import alerts, db
 from ..config import (AGENT_TOP_N, BREADTH_MIN, HOLD_MAX_DAYS, HOLD_MIN_DAYS, MIN_AVG_TRADED_VALUE,
                       ML_TOP_PCT,
                       SCORING_VERSION,
-                      STOP_ATR)
+                      STOP_ATR, STORAGE)
 from ..data import nse
 from ..data.events import window_event
 from ..data.live import live_quotes
@@ -88,6 +88,25 @@ def hist_stats(prob: float) -> dict:
     return best or {"win_rate": bt["base_win_rate"], "avg_ret": 0.0}
 
 
+_odds: dict = {}
+
+
+def signal_odds(ml_pct: int, gate_open: bool) -> dict | None:
+    """Observed outcomes of past walk-forward signals with the same ML rank and market state
+    (app/research/v2.py odds). None until that research file exists."""
+    path = STORAGE / "research" / "odds.json"
+    if not path.exists():
+        return None
+    stamp = path.stat().st_mtime
+    if _odds.get("stamp") != stamp:
+        _odds.update(stamp=stamp, data=json.loads(path.read_text()))
+    data = _odds["data"]
+    for r in data["rows"]:  # rows are ordered best rank first
+        if r["gate_open"] == gate_open and ml_pct >= r["min_pct"]:
+            return {**r, "from": data["from"], "to": data["to"]}
+    return None
+
+
 def tier(verdict: str, gates: dict) -> str:
     """One Buy tier ("strong"), only when every gate passes: it maps exactly to the live-setting variant of
     the survivorship-free walk-forward (ML top 2% + Nifty and breadth above their 200-day averages)."""
@@ -114,6 +133,22 @@ def judge(row, market: dict, res: dict, ml_pct: int) -> dict:
             "official_event": official}
 
 
+def mark_top_pick(picks: list[dict]) -> dict | None:
+    """Sort picks best first and flag the day's single best stock.
+
+    Order: Buy tier first, then ML percentile, then the raw ML probability (many picks share the same
+    percentile, so the probability breaks ties instead of the order the agents happened to finish in).
+    The top pick is the best stock the research agent cleared; it is a Buy only if its tier says so."""
+    rank = {"strong": 0, "watch": 1, "avoid": 2}
+    picks.sort(key=lambda p: (rank.get(p["tier"], 3), -p["score"], -p.get("ml_prob", 0)))
+    for p in picks:
+        p["top_pick"] = False
+    best = next((p for p in picks if p["tier"] != "avoid" and p.get("gates", {}).get("agent")), None)
+    if best:
+        best["top_pick"] = True
+    return best
+
+
 def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None, top_n: int = AGENT_TOP_N):
     progress = []
     plock = threading.Lock()  # agents log from several threads
@@ -137,7 +172,9 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
         market["breadth200"] = round(float((liquid.dist_ema200 > 0).mean()), 3)
         db.update_scan(scan_id, market=market)
         members = set(get_index(universe).symbol)
-        pool = scored[scored.symbol.isin(members) & (scored.traded_value_20 >= MIN_AVG_TRADED_VALUE)]
+        # only stocks with a bar for the latest session: a pick must be judged on today's data, not a stale bar
+        fresh = scored.as_of == scored.date
+        pool = scored[scored.symbol.isin(members) & (scored.traded_value_20 >= MIN_AVG_TRADED_VALUE) & fresh]
         if sector:
             pool = pool[pool.sector.str.lower() == sector.lower()]
         cands = [r for _, r in pool.head(top_n).iterrows()]
@@ -173,6 +210,7 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
                     "as_of": str(pd.Timestamp(r.as_of).date()), "ml_prob": round(float(r.prob), 4),
                     "ml_percentile": ml_pct, "hist_win_rate": hs["win_rate"], "hist_avg_ret": hs["avg_ret"],
                     "score": j["score"], "tier": j["tier"], "gates": j["gates"], "official_event": j["official_event"],
+                    "odds": signal_odds(ml_pct, j["gates"]["market"]),
                     "rubric_score": round(float(r.rubric), 1), "rubric_parts": r.rubric_parts,
                     "levels": snap["trade_levels"], "hold_days": f"{HOLD_MIN_DAYS}-{HOLD_MAX_DAYS}",
                     "technicals": {k: v for k, v in snap.items() if k not in ("last_30_closes", "trade_levels")},
@@ -180,7 +218,7 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
                 })
                 log_step(f"{r.symbol}: {'Buy' if j['tier'] == 'strong' else j['tier']} (ML top {max(1, 100 - ml_pct)}%, "
                          f"agent {'clear' if j['gates']['agent'] else 'flagged'})")
-        picks.sort(key=lambda p: -p["score"])
+        mark_top_pick(picks)
         db.save_picks(scan_id, picks)
         db.update_scan(scan_id, status="done")
         log_step(f"Done: {sum(p['tier'] == 'strong' for p in picks)} Buy · Nifty above 200-day average: "

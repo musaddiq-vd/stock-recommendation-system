@@ -56,6 +56,17 @@ export default function PickCard({ p, onOpen, settings, stat }: {
         </div>
       )}
 
+      {p.odds && (
+        <div
+          className="mt-2 text-[11px] text-zinc-300"
+          title={`${p.odds.signals.toLocaleString("en-IN")} past signals (${p.odds.from.slice(0, 4)}-${p.odds.to.slice(0, 4)}) with ML rank ${p.odds.label} and the market gate ${p.odds.gate_open ? "open" : "closed"}, scored by a model that had not seen them. Next-open entry, 0.3% cost.`}
+        >
+          Chance of profit <b className="text-white">{(p.odds.win * 100).toFixed(0)}%</b> · full target {(p.odds.target * 100).toFixed(0)}% · avg{" "}
+          {p.odds.avg_ret >= 0 ? "+" : ""}{(p.odds.avg_ret * 100).toFixed(1)}% in ~{Math.round(p.odds.avg_days)} days
+          <span className="text-zinc-500"> · from {p.odds.signals.toLocaleString("en-IN")} similar past signals</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-2 mt-3 text-center">
         <Lvl k="Entry" v={l.entry} />
         <Lvl k="Target" v={l.target} sub={`+${l.target_pct}%`} cls="text-emerald-400" />

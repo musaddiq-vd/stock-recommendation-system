@@ -5,6 +5,7 @@ import threading
 import time
 import warnings
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Literal
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -21,7 +22,7 @@ from .agents.orchestrator import ScanBusy, market_regime, scan_running, start_sc
 from .agents.tools import get_fundamentals, get_technicals
 from .chat import chat_stream
 from .data import nse
-from .data.prices import expected_last_bar, load
+from .data.prices import benchmark, expected_last_bar, ist_now, load
 from .model.train import load_model, train_all
 from .universe import get_universe
 
@@ -34,18 +35,63 @@ UNIVERSES = ("NIFTY50", "NIFTY100", "NIFTY500")
 
 
 # ---------------------------------------------------------------- scheduled jobs
-def daily_job():
+DATA_RETRIES = 4          # Yahoo sometimes publishes the day's bars late: retry before scanning old data
+RETRY_MINUTES = 30
+
+
+def latest_bar() -> str | None:
+    bars = benchmark()
+    return str(bars.index[-1].date()) if bars is not None and len(bars) else None
+
+
+def last_scanned_bar() -> str | None:
+    """Market date of the latest finished daily (Nifty 500) scan."""
+    s = db.latest_scan("NIFTY500")
+    return ((s or {}).get("market") or {}).get("date")
+
+
+def daily_job(attempt: int = 0):
+    """Evening update: fresh NSE/Yahoo data, outcomes, then one scan on the new session's bars."""
     for step in (lambda: nse.update_recent(7), nse.fii_dii, paper.update_all, update_outcomes):
         try:
             step()
         except Exception:
             log.exception("daily step failed")
+    try:
+        bar = latest_bar()
+    except Exception:
+        log.exception("benchmark load failed")
+        bar = None
+    if (bar is None or bar < str(expected_last_bar())) and attempt < DATA_RETRIES and scheduler.running:
+        # today's bars are not out yet: try again later instead of scanning yesterday's data
+        run_at = ist_now() + timedelta(minutes=RETRY_MINUTES)  # the scheduler runs on IST
+        scheduler.add_job(daily_job, "date", run_date=run_at, args=[attempt + 1], id="daily-retry",
+                          replace_existing=True)
+        log.info("latest bar %s < expected %s: daily job retry %d at %s", bar, expected_last_bar(),
+                 attempt + 1, run_at.strftime("%H:%M"))
+        return
     check_data_freshness()
     threading.Thread(target=sector_data.warm, daemon=True, name="sectors-warm").start()
+    if bar is not None and last_scanned_bar() == bar:
+        log.info("daily scan skipped: session %s is already scanned (holiday or catch-up already ran)", bar)
+        return
     try:
         start_scan("NIFTY500", None)
     except ScanBusy:
         log.warning("daily scan skipped: another scan is running")
+
+
+def catch_up() -> None:
+    """On startup: if the app was off when the daily job should have run, scan the sessions it missed."""
+    if not MODEL_PATH.exists():
+        return
+    try:
+        bar, scanned = latest_bar(), last_scanned_bar()
+        if bar and (scanned is None or scanned < bar):
+            log.info("catch-up: latest scan covers %s, market data has %s", scanned, bar)
+            daily_job(attempt=DATA_RETRIES)  # data is already there: no retries, scan now
+    except Exception:
+        log.exception("catch-up failed")
 
 
 def check_data_freshness() -> None:
@@ -84,8 +130,9 @@ async def lifespan(app):
     db.init_extra()
     if RUN_SCHEDULER:
         # Mon-Fri after NSE close (data on Yahoo settles by ~18:00 IST)
+        # misfire grace: if the machine was asleep at 18:30, still run when it wakes up the same evening
         scheduler.add_job(daily_job, "cron", day_of_week="mon-fri", hour=18, minute=30, id="daily",
-                          replace_existing=True)
+                          replace_existing=True, misfire_grace_time=5 * 3600)
         scheduler.add_job(intraday_job, "cron", day_of_week="mon-fri", hour="9-15", minute="*/15", id="intraday",
                           replace_existing=True)
         # Markets change: rebuild the point-in-time data and retrain the model on the 1st Saturday of every month
@@ -95,6 +142,7 @@ async def lifespan(app):
         scheduler.start()
         log.info("scheduler started")
         threading.Thread(target=sector_data.warm, daemon=True, name="sectors-warm").start()
+        threading.Thread(target=catch_up, daemon=True, name="catch-up").start()
     yield
     if scheduler.running:
         scheduler.shutdown(wait=False)

@@ -23,7 +23,8 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from ..config import HOLD_MAX_DAYS, STORAGE
-from ..features import BASE_FEATURES, PRICE_FEATURES, V8_FEATURES, add_cross_sectional, barrier_outcomes, compute, next_open_outcomes
+from ..features import (BASE_FEATURES, PRICE_FEATURES, V8_FEATURES, add_cross_sectional, barrier_outcomes, compute,
+                        next_open_outcomes)
 from ..universe import get_universe
 from .experiment import portfolio
 from .rubric_proxy import proxy_score
@@ -246,6 +247,45 @@ def export(source: str = "pit", breadth_min: float = 0.5) -> dict:
     return out
 
 
+ODDS_PATH = STORAGE / "research" / "odds.json"
+ODDS_BUCKETS = ((99, "top 1%"), (98, "top 2%"), (95, "top 3-5%"), (90, "top 6-10%"), (0, "below top 10%"))
+
+
+def odds(source: str = "pit") -> dict:
+    """What happened to past signals like this one: every walk-forward signal (scored by a model that had not
+    seen it), grouped by the day's ML rank and whether the market gate was open. Bought at the next open with
+    the live target and stop, 0.3% cost. The app shows these observed rates next to each pick as its chance of
+    profit; they are frequencies of past outcomes, not a promise for one trade."""
+    cols = ["date", "symbol", "y_open", "r_open", "d_open", "mkt_above_200", "breadth200", "traded_value_20"]
+    df = pd.read_parquet(OUT / f"walk_{source}.parquet").merge(
+        pd.read_parquet(OUT / f"dataset_{source}.parquet", columns=cols), on=["date", "symbol"], how="inner")
+    df = df[df.traded_value_20 > 1e7].dropna(subset=["r_open"])
+    df["net"] = df.r_open - COST_REAL
+    df["pct"] = np.floor(df.pct_gbm * 100)
+    gate = df.mkt_above_200 & (df.breadth200 > 0.5)
+    rows, hi = [], 101
+    for lo, label in ODDS_BUCKETS:
+        for is_open in (True, False):
+            part = df[(df.pct >= lo) & (df.pct < hi) & (gate == is_open)]
+            recent = part[part.date >= SPLIT]
+            if len(part) < 200:
+                continue
+            rows.append({"gate_open": is_open, "min_pct": lo, "label": label, "signals": len(part),
+                         "win": round(float((part.net > 0).mean()), 4),
+                         "target": round(float(part.y_open.mean()), 4),
+                         "avg_ret": round(float(part.net.mean()), 4),
+                         "avg_win": round(float(part.net[part.net > 0].mean()), 4),
+                         "avg_loss": round(float(part.net[part.net <= 0].mean()), 4),
+                         "avg_days": round(float(part.d_open.mean()), 1),
+                         "recent_signals": len(recent),
+                         "recent_win": round(float((recent.net > 0).mean()), 4) if len(recent) >= 200 else None})
+        hi = lo
+    out = {"source": source, "from": str(df.date.min().date()), "to": str(df.date.max().date()),
+           "recent_from": SPLIT, "cost": COST_REAL, "rows": rows}
+    ODDS_PATH.write_text(json.dumps(out, indent=1))
+    return out
+
+
 if __name__ == "__main__":
     import warnings
 
@@ -256,6 +296,8 @@ if __name__ == "__main__":
         build(src)
     elif cmd == "walk":
         walk(src)
+    elif cmd == "odds":
+        print(pd.DataFrame(odds(src)["rows"]).to_string(index=False))
     elif cmd == "export":
         for v in export(src)["variants"]:
             print(v["name"], {k: v[k] for k in ("trades", "win_rate", "profit_factor", "max_dd", "losing_years")})
