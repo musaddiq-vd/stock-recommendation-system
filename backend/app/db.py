@@ -4,7 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 
-from .config import DB_PATH
+from .config import DB_PATH, ROUND_TRIP_COST
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS scans (
@@ -118,7 +118,8 @@ def performance(version: str, recent: int = 25) -> dict:
 
     Picks from older rule sets are only counted, never mixed into the tier numbers.
     The same stock recommended on the same day by several scans counts once (latest scan's tier).
-    A win is a trade that closed in profit (target, or above entry at the 20-day exit), before costs.
+    A win is a trade that closed in profit after the 0.3% round-trip cost (target, or above entry at the
+    20-day exit), the same definition as the 22-year backtest and the chance of profit shown on each pick.
     """
     with conn() as c:
         rows = [dict(r) for r in c.execute(
@@ -152,10 +153,11 @@ def _group(rows, key):
 def _stats(rows) -> dict:
     closed = [r for r in rows if r["outcome"] in CLOSED]
     n = len(closed)
+    net = [(r["outcome_ret"] or 0) - ROUND_TRIP_COST for r in closed]  # same cost as the backtest and the odds
     return {"closed": n, "open": len(rows) - n,
-            "win_rate": round(sum((r["outcome_ret"] or 0) > 0 for r in closed) / n, 3) if n else None,
+            "win_rate": round(sum(x > 0 for x in net) / n, 3) if n else None,
             "target_rate": round(sum(r["outcome"] == "target" for r in closed) / n, 3) if n else None,
-            "avg_ret": round(sum(r["outcome_ret"] or 0 for r in closed) / n, 4) if n else None}
+            "avg_ret": round(sum(net) / n, 4) if n else None}
 
 
 # ---------- settings / paper trades / alerts ----------

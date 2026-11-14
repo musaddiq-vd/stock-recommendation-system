@@ -34,7 +34,7 @@ const SUGGESTIONS = [
   "Any Buy calls today? Why or why not?",
   "I have ₹1,00,000. How should I size today's picks?",
   "Any good swing trade in the banking sector?",
-  "What is the 15-20 day outlook for RELIANCE?",
+  "Is RELIANCE a swing trade right now?",
 ];
 const STORE = "chat-history-v1";
 const KEEP = 40; // messages remembered in this browser

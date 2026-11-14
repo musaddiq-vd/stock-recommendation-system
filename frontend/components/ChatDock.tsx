@@ -99,7 +99,7 @@ export default function ChatDock() {
 
       <button
         onClick={() => setMobileOpen((o) => !o)}
-        className={`lg:hidden fixed right-4 z-30 rounded-full bg-emerald-600 text-sm font-semibold text-white shadow-lg ${mobileOpen ? "top-3 px-3 py-1.5" : "bottom-4 px-4 py-3"}`}
+        className={`lg:hidden fixed right-4 z-30 rounded-full bg-emerald-600 text-sm font-semibold text-white shadow-lg ${mobileOpen ? "top-3 px-3 py-1.5" : "bottom-[4.75rem] px-4 py-3"}`}
       >
         {mobileOpen ? "✕ Close" : "💬 Chat"}
       </button>

@@ -2,7 +2,7 @@
 
 # 📈 AI Swing Trader · NSE
 
-**An end-to-end AI system that finds 15–20 day swing trades in Indian stocks (Nifty 50 / 100 / 500),
+**An end-to-end AI system that finds swing trades of up to 20 sessions in Indian stocks (Nifty 50 / 100 / 500),
 researches each one with LLM agents, and tracks every call against real market data.**
 
 ![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
@@ -19,7 +19,7 @@ researches each one with LLM agents, and tracks every call against real market d
 
 <br/>
 
-<img src="docs/screenshots/dashboard.png" alt="Dashboard with the latest scan, market gate status and pick cards" width="100%"/>
+<img src="docs/screenshots/dashboard.png" alt="Dashboard with the navigation rail, market status, the top pick of the day and pick cards" width="100%"/>
 
 </div>
 
@@ -33,14 +33,14 @@ researches each one with LLM agents, and tracks every call against real market d
 
 | | |
 |---|---|
-| **Stock detail:** chance of winning from similar past signals, chart with entry / target / stop, risk-based size and rubric | **Research chat:** reads the latest scan, says when there is no Buy call and why |
+| **Stock detail:** chance of winning from similar past signals, chart with entry / target / stop, risk-based size and rubric | **Research chat:** reads the latest scan and lists the Buy calls, or says why there are none |
 | <img src="docs/screenshots/stock-detail.png" alt="Stock detail drawer"/> | <img src="docs/screenshots/chat.png" alt="Research chat answer"/> |
 | **Sector heatmap:** tiles sized by turnover; click a sector to see its stocks | **Rotation map:** which sectors are leading, weakening, lagging or improving vs the market |
 | <img src="docs/screenshots/heatmap-tiles.png" alt="Sector heatmap tiles"/> | <img src="docs/screenshots/rotation-map.png" alt="Sector rotation map"/> |
-| **Backtest:** live track record and the 22-year survivorship-free walk-forward | **Mobile:** the same dashboard on a phone, chat behind a button |
+| **Backtest:** live track record and the 22-year survivorship-free walk-forward | **Mobile:** the same dashboard on a phone, pages in a bottom bar, chat behind a button |
 | <img src="docs/screenshots/backtest.png" alt="Backtest tab"/> | <img src="docs/screenshots/mobile.png" alt="Mobile view" width="60%"/> |
 
-<sub>Dashboard, stock detail, backtest and mobile: local run on 14 Nov 2026 (market gate open, 9 Buy calls). Chat, heatmap and rotation map: 9 Nov 2026, when the gate was closed. Market data only; not advice.</sub>
+<sub>Dashboard, stock detail, chat, backtest and mobile: local run on 14 Nov 2026 (market gate open, 9 Buy calls). Heatmap and rotation map: 9 Nov 2026. Market data only; not advice.</sub>
 
 ---
 
@@ -351,12 +351,12 @@ reference.
 
 | Tab | What you see |
 |---|---|
-| **AI Picks** | Scanned stocks as cards (filter All / Buy / Watch / Avoid) with entry / target / stop, the three checks and official event badges; Buy cards also show the 22-year stats and position size. A line on top says whether the market gate is open. Click a card for the candlestick chart, rubric breakdown, gates, the agent's news findings, fundamentals, sources and the full research trail. |
+| **AI Picks** | Status tiles (market gate, Buy calls, the Buy rule's 22-year record, latest scan), the top pick of the day, then the scanned stocks as cards (filter All / Buy / Watch / Avoid, search by symbol, name or sector) with entry / target / stop, the chance of profit, the three checks and official event badges; Buy cards also show the 22-year stats and position size. Click a card for the candlestick chart, rubric breakdown, gates, the agent's news findings, fundamentals, sources and the full research trail. |
 | **Sector Heatmap** | Money flow (20D / 5D), 1D–3M returns, relative strength, breadth, turnover and delivery surge per sector. |
 | **Backtest** | Live track record of past picks, the 22-year walk-forward (equity, yearly returns, per-tier stats) and the latest model's 12-month test. |
 | **Paper Portfolio** | Virtual equity, realized / unrealized P&L, win rate and every open or closed trade. |
 
-The research chat sits on the right (a floating button on mobile). Settings hold capital, risk % and Telegram.
+Pages are on a rail at the left (a bar at the bottom on phones) and live in the URL (`#picks`, `#sectors`, `#backtest`, `#paper`), so refresh, back / forward and shared links keep the page. The bar on top shows Nifty, the regime, the market gate and FII/DII flows on every page. The research chat sits on the right (a floating button on mobile). Settings hold capital, risk % and Telegram. Esc closes the stock drawer and the settings dialog.
 
 ---
 
@@ -408,7 +408,8 @@ environment variables, never from this repo.
 | `LOG_LEVEL` | `INFO` | Python logging level |
 | `AWS_REGION` | `us-east-1` | Bedrock region |
 | `BEDROCK_MODEL_ID` | `moonshotai.kimi-k2.5` | Any Bedrock model that supports the Converse API with tool use |
-| `HOLD_MIN_DAYS` / `HOLD_MAX_DAYS` | `15` / `20` | Swing holding window |
+| `HOLD_MAX_DAYS` | `20` | Time limit of a trade in sessions (trades last about 12 on average) |
+| `ROUND_TRIP_COST` | `0.003` | Trading cost per round trip used in the live track record (same 0.3% as the backtest) |
 | `TARGET_ATR` / `STOP_ATR` | `3.5` / `2.5` | Barrier distances in ATR multiples |
 | `ML_TOP_PCT` | `98` | Minimum ML percentile for a Buy (top 2%) |
 | `BREADTH_MIN` | `0.5` | Minimum share of stocks above their 200-day average (Nifty must also be above its own) |

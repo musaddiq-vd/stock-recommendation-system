@@ -10,6 +10,15 @@ export const GATE_HINT: Record<string, string> = {
   agent: "Research agent found no red flags, no negative news and no results inside the holding window",
 };
 
+/** Plain names for the checks, so cards never show internal keys like "ml_top". */
+export const GATE_LABEL: Record<string, string> = {
+  ml_top: "ML top 2%", market: "Market gate", agent: "Agent clear", regime: "Nifty trend", rubric: "Rubric",
+};
+
+const OUTCOME_LABEL: Record<string, string> = {
+  target: "target hit", stop: "stop hit", timeout: "closed at 20-day limit", open: "open", skipped: "not taken (gap past a level)",
+};
+
 const OUTCOME_STYLE: Record<string, string> = {
   target: "text-emerald-400", stop: "text-red-400", timeout: "text-zinc-300", open: "text-sky-300",
 };
@@ -50,7 +59,7 @@ export default function PickCard({ p, onOpen, settings, stat }: {
       </div>
 
       {stat && (
-        <div className="mt-2 text-[11px] text-emerald-200/90" title="22-year walk-forward result of picks in this tier, after 0.2% costs">
+        <div className="mt-2 text-[11px] text-emerald-200/90" title="22-year walk-forward result of the Buy rule: next-open entries, gap fills, 0.3% cost per trade">
           22-yr test incl. delisted stocks: {(stat.win_rate * 100).toFixed(0)}% trades profitable · profit factor {stat.profit_factor}{" "}
           · worst drawdown {(stat.max_dd * 100).toFixed(0)}%
         </div>
@@ -86,23 +95,23 @@ export default function PickCard({ p, onOpen, settings, stat }: {
       )}
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 text-[11px] text-zinc-400">
-        <span>ML top {Math.max(1, 100 - p.ml_percentile)}%</span>
+        <span>ML rank: top {Math.max(1, 100 - p.ml_percentile)}%</span>
         {p.gates && (
           <span className="flex gap-1">
             {Object.entries(p.gates).map(([g, ok]) => (
               <span key={g} title={GATE_HINT[g]} className={`rounded px-1 ${ok ? "bg-emerald-900/60 text-emerald-300" : "bg-zinc-800 text-zinc-500 line-through"}`}>
-                {g}
+                {GATE_LABEL[g] || g}
               </span>
             ))}
           </span>
         )}
         <span>News: {p.research.news_sentiment}</span>
-        <span>Hold up to {p.hold_days.split("-").pop()}d</span>
+        <span>Hold up to {p.hold_days.split("-").pop()} days</span>
       </div>
       <p className="text-xs text-zinc-300 mt-2 line-clamp-3">{p.research.summary}</p>
       {p.outcome && (
         <div className="mt-2 text-[11px] text-zinc-400">
-          Result so far: <b className={OUTCOME_STYLE[p.outcome] || ""}>{p.outcome}</b>{" "}
+          Result so far: <b className={OUTCOME_STYLE[p.outcome] || ""}>{OUTCOME_LABEL[p.outcome] || p.outcome}</b>{" "}
           {p.outcome_ret != null && `(${p.outcome_ret > 0 ? "+" : ""}${(p.outcome_ret * 100).toFixed(1)}%)`}
         </div>
       )}

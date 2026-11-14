@@ -51,11 +51,16 @@ def find_chat_id(token: str) -> str | None:
 
 def fmt_pick(p: dict) -> str:
     L = p["levels"]
-    tier = "🔥 HIGH PROBABILITY" if p["tier"] == "strong" else "✅ Good"
     summary = (p.get("research", {}).get("summary") or "")[:220]
-    return (f"<b>🟢 BUY {p['symbol']}</b> ({tier}, score {p['score']:.0f})\n"
-            f"Entry ₹{L['entry']} → Target ₹{L['target']} · Stop ₹{L['stop_loss']} · hold {p['hold_days']}d\n"
-            f"<i>{summary}</i>")
+    odds = p.get("odds") or {}
+    # the same honest numbers as the dashboard card: a Buy is about a coin flip with a better payoff, not a sure thing
+    chance = (f"Similar past signals: {odds['win'] * 100:.0f}% closed in profit, {odds['target'] * 100:.0f}% reached "
+              f"the target (avg {odds['avg_days']:.0f} days)\n") if odds.get("win") is not None else ""
+    top = " · top pick of the day" if p.get("top_pick") else ""
+    return (f"<b>🟢 BUY {p['symbol']}</b> (ML top {max(1, 100 - int(p['score']))}%{top})\n"
+            f"Entry ₹{L['entry']} → Target ₹{L['target']} · Stop ₹{L['stop_loss']} · "
+            f"hold up to {str(p['hold_days']).split('-')[-1]} trading days\n"
+            f"{chance}<i>{summary}</i>")
 
 
 def scan_summary(scan: dict) -> None:

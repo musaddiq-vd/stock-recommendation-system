@@ -23,7 +23,10 @@ HOLD_MAX_DAYS = int(os.getenv("HOLD_MAX_DAYS", 20))
 TARGET_ATR = float(os.getenv("TARGET_ATR", 3.5))  # target = entry + 3.5 x ATR
 STOP_ATR = float(os.getenv("STOP_ATR", 2.5))       # stop = entry - 2.5 x ATR (chosen by the 22-year walk-forward)
 
-HISTORY_PERIOD = os.getenv("HISTORY_PERIOD", "6y")
+# Round-trip trading cost used everywhere a result is shown: 0.2% brokerage and taxes + 0.1% slippage
+ROUND_TRIP_COST = float(os.getenv("ROUND_TRIP_COST", 0.003))
+
+HISTORY_PERIOD =os.getenv("HISTORY_PERIOD", "6y")
 MIN_AVG_TRADED_VALUE = float(os.getenv("MIN_AVG_TRADED_VALUE", 5e7))  # Rs 5 cr/day
 AGENT_TOP_N = int(os.getenv("AGENT_TOP_N", 15))
 

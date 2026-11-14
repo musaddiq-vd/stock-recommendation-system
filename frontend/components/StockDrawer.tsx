@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { createChart, ColorType, LineStyle } from "lightweight-charts";
 import { get, Pick, post, TIER_STYLE } from "@/lib/api";
 import { inr, positionSize, Settings } from "@/lib/sizing";
-import { GATE_HINT } from "./PickCard";
+import { useEscape } from "@/lib/useEscape";
+import { GATE_HINT, GATE_LABEL } from "./PickCard";
 
 type Candle = { time: string; open: number; high: number; low: number; close: number; volume: number };
 // rule-based rubric, shown for context only (it did not improve the survivorship-free backtest)
@@ -13,6 +14,7 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
   pick: Pick; onClose: () => void; settings: Settings | null; scanId?: number; onPaper: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  useEscape(onClose);
   const [fund, setFund] = useState<Record<string, unknown>>({});
   const size = positionSize(pick, settings);
   const [qty, setQty] = useState(size?.qty || 1);
@@ -175,7 +177,7 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
           <Section title="Gates (all must pass for Buy)">
             <ul className="text-xs space-y-1">
               {Object.entries(pick.gates).map(([g, ok]) => (
-                <li key={g} className={ok ? "text-emerald-300" : "text-zinc-500"}>{ok ? "✓" : "✗"} <b>{g}</b>: {GATE_HINT[g]}</li>
+                <li key={g} className={ok ? "text-emerald-300" : "text-zinc-500"}>{ok ? "✓" : "✗"} <b>{GATE_LABEL[g] || g}</b>: {GATE_HINT[g]}</li>
               ))}
             </ul>
           </Section>

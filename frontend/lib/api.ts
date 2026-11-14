@@ -24,7 +24,7 @@ export interface Pick {
   official_event?: { purpose: string; date: string; desc: string } | null;
   rubric_score?: number;
   rubric_parts?: Record<string, number>;
-  gates?: Record<string, boolean>; // current: ml_top, breadth, agent (older scans: regime, rubric, agent)
+  gates?: Record<string, boolean>; // current: ml_top, market, agent (older scans: regime, rubric, agent)
   as_of: string;
   ml_prob: number;
   ml_percentile: number;

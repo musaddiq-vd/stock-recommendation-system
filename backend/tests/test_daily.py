@@ -68,6 +68,52 @@ def test_signal_odds_match_rank_and_market_state(tmp_path, monkeypatch):
     assert orchestrator.signal_odds(99, True) is None  # no research file: the card simply shows no odds
 
 
+def test_live_record_counts_wins_after_costs():
+    from app import db
+
+    db.init()
+    base = {"levels": {"entry": 100, "target": 110, "stop_loss": 95}, "as_of": "2026-02-02", "score": 99,
+            "tier": "strong", "scoring_version": "cost-v"}
+    sid = db.create_scan("NIFTY50", None, "news")
+    db.save_picks(sid, [{**base, "symbol": "AAA"}, {**base, "symbol": "BBB"}])
+    rets = {"AAA": 0.10, "BBB": 0.002}  # BBB closed 0.2% up: a loss once the 0.3% cost is paid
+    for p in db.open_picks():
+        if p["symbol"] in rets:
+            db.set_outcome(p["id"], "target" if p["symbol"] == "AAA" else "timeout", rets[p["symbol"]], 5)
+    t = db.performance("cost-v")["tiers"]["strong"]
+    assert t["closed"] == 2 and t["win_rate"] == 0.5
+    assert t["avg_ret"] == round((0.10 + 0.002) / 2 - 0.003, 4)
+
+
+def test_buy_alert_is_honest_about_the_odds():
+    from app import alerts
+
+    pick = {"symbol": "TCS", "tier": "strong", "score": 99.0, "hold_days": "15-20", "top_pick": True,
+            "levels": {"entry": 100, "target": 110, "stop_loss": 95}, "research": {"summary": "No red flags."},
+            "odds": {"win": 0.52, "target": 0.38, "avg_days": 12.1}}
+    text = alerts.fmt_pick(pick)
+    assert "ML top 1%" in text and "top pick of the day" in text and "hold up to 20 trading days" in text
+    assert "52% closed in profit" in text and "38% reached the target" in text
+    assert "HIGH PROBABILITY" not in text
+    assert "Similar past signals" not in alerts.fmt_pick({**pick, "odds": None})  # older picks have no odds
+
+
+def test_chat_picks_carry_the_same_odds_as_the_cards(monkeypatch):
+    from app import chat
+
+    pick = {"symbol": "TCS", "name": "TCS", "sector": "IT", "tier": "strong", "score": 99.0, "top_pick": True,
+            "levels": {"entry": 100, "target": 110, "stop_loss": 95}, "research": {"summary": "ok"},
+            "gates": {"ml_top": True, "market": True, "agent": True},
+            "odds": {"win": 0.52, "target": 0.38, "avg_days": 12.1, "signals": 13084}}
+    scan = {"created_at": "2026-11-14T21:49:27", "universe": "NIFTY500", "picks": [pick],
+            "market": {"above_ema200": True, "breadth200": 0.505}}
+    monkeypatch.setattr(chat.db, "latest_scan", lambda u=None: scan)
+    monkeypatch.setattr(chat.db, "get_settings", lambda: {"capital": "500000", "risk_pct": "1"})
+    buy = chat.get_latest_picks()["buy_calls"][0]
+    assert buy["odds"] == {"closed_in_profit": 0.52, "reached_target": 0.38, "avg_days_held": 12.1, "past_signals": 13084}
+    assert buy["top_pick_of_the_day"] is True
+
+
 class _Sched:
     running = True
 

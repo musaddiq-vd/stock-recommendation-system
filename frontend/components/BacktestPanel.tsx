@@ -78,7 +78,8 @@ function TrackRecord({ t }: { t: Track | null }) {
         <div className="text-sm font-semibold text-white">Live track record</div>
         <p className="text-xs text-zinc-400 mt-1">
           Real outcomes of this app&apos;s own recommendations, checked against market prices: target hit, stop hit, or closed at the
-          20-day limit. Each stock-day counts once. A trade is profitable if it closed above entry (before costs).
+          20-day limit. Each stock-day counts once. A trade is profitable if it closed above entry after the 0.3% trading cost, the same rule as the 22-year test;
+          the per-trade returns in the table are price moves before that cost.
           Only picks made with the current scoring rules (v{t.version}) are counted
           {t.earlier_version_picks > 0 && <> · {t.earlier_version_picks} picks from earlier rule sets are excluded</>}.
         </p>

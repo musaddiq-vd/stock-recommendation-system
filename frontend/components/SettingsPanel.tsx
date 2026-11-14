@@ -2,8 +2,10 @@
 import { useState } from "react";
 import { post, put } from "@/lib/api";
 import { Settings } from "@/lib/sizing";
+import { useEscape } from "@/lib/useEscape";
 
 export default function SettingsPanel({ s, onSaved, onClose }: { s: Settings; onSaved: (s: Settings) => void; onClose: () => void }) {
+  useEscape(onClose);
   const [capital, setCapital] = useState(s.capital);
   const [risk, setRisk] = useState(s.risk_pct);
   const [alertsOn, setAlertsOn] = useState(s.alerts_enabled === "1");

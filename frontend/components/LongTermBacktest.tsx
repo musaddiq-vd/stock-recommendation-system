@@ -120,8 +120,10 @@ export default function LongTermBacktest() {
       )}
 
       <p className="text-[11px] text-zinc-500">
-        Caveats: the stock list is today&apos;s Nifty 500, so delisted losers are missing (survivorship bias), which flatters every row,
-        including the random baseline. Compare strategies with each other, not with absolute returns. 0.2% cost per trade included.
+        {r.survivorship_free
+          ? "Caveats: prices are adjusted for splits and bonuses detected from overnight gaps, and the universe is the 500 most traded stocks each month, a stand-in for the Nifty 500 of the time."
+          : "Caveats: the stock list is today's Nifty 500, so delisted losers are missing (survivorship bias), which flatters every row, including the random baseline."}
+        {" "}Compare strategies with each other, not with absolute returns. {((r.cost ?? 0.003) * 100).toFixed(1)}% cost per trade included.
       </p>
     </div>
   );

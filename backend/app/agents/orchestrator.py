@@ -1,7 +1,8 @@
-"""Scan pipeline: universe → ML screener → validated rubric → research-agent veto → tiers → DB.
+"""Scan pipeline: universe → ML screener → market gate → research-agent veto → tiers → DB.
 
-Only parts validated on 22 years of walk-forward data move the score (ML rank and the rule-based rubric).
-The research agent can only hold a pick back (red flags, negative news, results inside the holding window).
+Only parts validated on 22 years of walk-forward data decide a Buy: the day's ML rank and the market gate.
+The rule-based rubric is stored for context only. The research agent can only hold a pick back (red flags,
+negative news, results inside the holding window).
 """
 import json
 import logging
