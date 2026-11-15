@@ -71,6 +71,7 @@ def daily_job(attempt: int = 0):
                  attempt + 1, run_at.strftime("%H:%M"))
         return
     check_data_freshness()
+    check_model_drift()
     threading.Thread(target=sector_data.warm, daemon=True, name="sectors-warm").start()
     if bar is not None and last_scanned_bar() == bar:
         log.info("daily scan skipped: session %s is already scanned (holiday or catch-up already ran)", bar)
@@ -105,6 +106,19 @@ def check_data_freshness() -> None:
                                                   "Picks are not reliable until it updates.")
     except Exception:
         log.exception("freshness check failed")
+
+
+def check_model_drift() -> None:
+    """Alert (once a week at most) when live Buy results fall clearly below the chance of profit they were shown with."""
+    try:
+        d = db.performance(SCORING_VERSION)["live_vs_expected"]
+        if d.get("status") == "below":
+            week = ist_now().strftime("%G-W%V")
+            alerts.ops_alert(f"drift:{week}", f"live Buy results are below expectations: {d['actual']:.0%} of "
+                             f"{d['closed']} closed trades made a profit after costs, against {d['expected']:.0%} expected "
+                             f"(normal range {d['band'][0]:.0%}-{d['band'][1]:.0%}). Review the model before trusting new calls.")
+    except Exception:
+        log.exception("drift check failed")
 
 
 def weekly_job():
@@ -487,6 +501,15 @@ def backtest_report():
     out = {k: r.get(k) for k in ("auc", "test_from", "test_to", "trained_at", "portfolio", "backtest")}
     out["top_features"] = (r.get("feature_importance") or [])[:10]
     return out
+
+
+@app.get("/api/calibration")
+def calibration():
+    """Predicted vs actual target-hit rate by probability decile (built by `python -m app.research.v2 calib pit`)."""
+    path = STORAGE / "research" / "calibration.json"
+    if not path.exists():
+        raise HTTPException(404, "Run: python -m app.research.v2 calib pit")
+    return json.loads(path.read_text())
 
 
 @app.get("/api/research")

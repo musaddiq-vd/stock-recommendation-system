@@ -60,7 +60,12 @@ def gate_reason(market: dict) -> str:
     b = market.get("breadth200")
     breadth = f"{b:.1%} of stocks are above theirs" if b is not None else "breadth is unknown"
     need = f"needs Nifty above and over {BREADTH_MIN:.0%} of stocks above"
-    return f"{nifty} its 200-day average; {breadth} (gate {need})."
+    trend = ""
+    if market.get("adx") is not None:
+        trend = f" Nifty trend strength (ADX) is {market['adx']:.0f}: {market.get('trend', '')}."
+        if market.get("trend_adx_min"):
+            trend += f" Buy calls also need ADX of at least {market['trend_adx_min']:.0f}."
+    return f"{nifty} its 200-day average; {breadth} (gate {need}).{trend}"
 
 
 def get_latest_picks(universe: str | None = None, sector: str | None = None, limit: int = 10,
@@ -79,7 +84,7 @@ def get_latest_picks(universe: str | None = None, sector: str | None = None, lim
     except (TypeError, ValueError):
         cap, risk = 0.0, 1.0
     market = scan["market"] or {}
-    gate_open = bool(market.get("above_ema200")) and (market.get("breadth200") or 0) > BREADTH_MIN
+    gate_open = market.get("gate_open", bool(market.get("above_ema200")) and (market.get("breadth200") or 0) > BREADTH_MIN)
     picks = [p for p in scan["picks"] if not sector or sector.lower() in (p.get("sector") or "").lower()]
     buy, watch = [], []
     for p in picks:

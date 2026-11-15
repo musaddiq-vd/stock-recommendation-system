@@ -94,7 +94,8 @@ def weekly_summary(scan: dict | None, perf: dict, paper: dict) -> str:
     lines = ["🗓 <b>Weekly summary</b>"]
     if scan:
         m = scan.get("market") or {}
-        gate = bool(m.get("above_ema200")) and (m.get("breadth200") or 0) > 0.5
+        # the scan stores its own verdict (it includes the optional trend filter); older scans fall back to the two checks
+        gate = m.get("gate_open", bool(m.get("above_ema200")) and (m.get("breadth200") or 0) > 0.5)
         lines.append(f"Market gate: <b>{'open' if gate else 'closed'}</b> (Nifty "
                      f"{'above' if m.get('above_ema200') else 'below'} 200-day avg, breadth {round((m.get('breadth200') or 0) * 100)}%)")
         buys = [p["symbol"] for p in scan.get("picks", []) if p.get("tier") == "strong"]

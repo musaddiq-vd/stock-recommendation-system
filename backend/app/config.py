@@ -35,6 +35,11 @@ ML_TOP_PCT = float(os.getenv("ML_TOP_PCT", 98))         # only the top 2% of the
 # Market gate, chosen on pre-2016 data and confirmed on 2016+: Nifty above its 200-day average AND
 # more than half of the liquid stocks above their own 200-day averages
 BREADTH_MIN = float(os.getenv("BREADTH_MIN", 0.5))
+# Trend filter: no Buy calls while Nifty's 14-day ADX is below this (a sideways market). 0 turns it off.
+# In the 22-year test ADX >= 20 raised the Buy rule's profit factor from 1.37 to 1.49 and cut the worst drawdown
+# from -29% to -22% in both halves of the test, with ~30% fewer trades (app/research/edge_lab.py).
+TREND_ADX_MIN = float(os.getenv("TREND_ADX_MIN", 20))
+SIDEWAYS_ADX = 20  # below this the market is shown as sideways
 
 BENCHMARK = "^NSEI"
 
@@ -45,4 +50,4 @@ RUN_SCHEDULER = os.getenv("RUN_SCHEDULER", "1") == "1"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
 # Bump when tiers or scoring rules change, so the live track record never mixes different rule sets
-SCORING_VERSION = "9"
+SCORING_VERSION = "10"  # 10: market gate also needs a trending Nifty (ADX >= TREND_ADX_MIN)

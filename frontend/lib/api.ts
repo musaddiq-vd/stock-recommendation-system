@@ -51,6 +51,10 @@ export interface Market {
   ret_20d_pct: number;
   above_ema200: boolean;
   regime: "bullish" | "neutral" | "bearish";
+  adx?: number; // Nifty trend strength (14-day ADX)
+  trend?: "trending" | "sideways";
+  gate_open?: boolean; // stored by scans; includes the optional trend filter
+  trend_adx_min?: number;
   date: string;
   flows?: { date?: string; fii?: number; dii?: number; fii_5d?: number; dii_5d?: number; days_tracked?: number };
   breadth200?: number;

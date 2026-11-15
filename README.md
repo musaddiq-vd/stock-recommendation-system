@@ -49,7 +49,7 @@ researches each one with LLM agents, and tracks every call against real market d
 | | Feature | What it does |
 |---|---|---|
 | 🧮 | **ML screener** | A LightGBM model ranks ~480 liquid NSE stocks every day by the probability that a long swing trade hits its target before its stop within 20 sessions. |
-| 🌡️ | **Market gate** | Buy calls only when Nifty and more than half of the market's stocks are above their 200-day averages; this cut the worst drawdown from −65% to −21% in the honest backtest. |
+| 🌡️ | **Market gate** | Buy calls only when Nifty and more than half of the market's stocks are above their 200-day averages and Nifty is trending (ADX ≥ 20); this cut the worst drawdown from −65% to −21% in the honest backtest. |
 | 🤖 | **Research agent** | For the top candidates, an LLM agent (AWS Bedrock) reads news, filings, fundamentals and official NSE event dates, and can veto a pick for red flags, negative news or results inside the holding window. |
 | 🟢 | **One honest Buy tier** | A stock is a green **Buy** only when all three checks pass: top 2% of the daily ML ranking, market gate open, research agent clear. Everything else is **Watch** or **Avoid**, never a buy. |
 | 🎯 | **Chance of profit on every pick** | Each card shows what happened to past signals with the same ML rank and market state: how often they closed in profit, how often they reached the full target, the average win and loss and the average holding time. These are observed frequencies from the 22-year walk-forward, not a promise for one trade. |
@@ -58,7 +58,9 @@ researches each one with LLM agents, and tracks every call against real market d
 | 📝 | **Paper trading** | Open virtual trades from any pick: bought at the current price, with target and stop moved to keep their distance from that fill. They auto-close at target, stop or the 20-day timeout; P&L is after the 0.3% cost, one open trade per stock. |
 | 🔔 | **Telegram alerts** | New Buy calls, target/stop hits, paper-trade exits, a weekly summary, and warnings when a scan fails or data goes stale. |
 | 🔬 | **22-year research** | Walk-forward test from 2004 to 2026 on 30 years of data: 20 target/stop settings, regime and rubric filters, a random baseline and an anonymised LLM test. |
-| 📈 | **Live track record** | Real outcomes of the app's own past picks (target, stop or 20-day exit), per tier. |
+| 📈 | **Live track record** | Real outcomes of the app's own past picks (target, stop or 20-day exit), per tier, next to the chance of profit those picks were shown with. When live results fall clearly below it (more than two standard errors after 20 trades), a Telegram alert says so. |
+| 🎚️ | **Calibration table** | The model's predicted chance of reaching the target next to what actually happened, out-of-sample, by score decile. |
+| 🧭 | **Trend strength** | The Nifty trend (14-day ADX) on every page: trending or sideways. No Buy calls while it is sideways (set `TREND_ADX_MIN=0` to turn this off). |
 | 📊 | **Backtest dashboard** | Out-of-sample equity curve vs Nifty, drawdown chart, monthly returns and a feature-set comparison. |
 | 💬 | **Research chat** | Ask about any stock or sector. The chat uses the same live tools and the latest scan, only calls Buy-tier picks a buy, sizes positions by your risk setting and never invents price levels. |
 | ⏰ | **Automation** | Daily scan after market close (it waits and retries until the day's bars are published, and catches up on startup if the app was off), intraday target/stop checks every 15 minutes, monthly model retraining. |
@@ -155,15 +157,42 @@ touched in one bar, the stop is assumed to hit first. Trades last ~13 sessions o
   several seeds before it is adopted; a single better backtest is not evidence.
 - **Not testable with free data:** fundamentals, promoter / FII holdings and bulk deals have no free point-in-time
   history that includes delisted stocks, so they are left to the research agent instead of being put in the model.
+- **Third round** (`python -m app.research.edge_lab`, Nov 2026, live recipe scored 2008–2026):
+
+  | Idea | Before 2016 PF | 2016+ PF | Worst drawdown (2016+) | Kept? |
+  |---|---:|---:|---:|---|
+  | Live rule (ML top 2% + market gate) | 1.56 | 1.28 | −29% | – |
+  | + Nifty trending (ADX ≥ 20) | 1.63 | 1.41 | −22% | Yes, since scoring version 10 |
+  | + not sideways (skip ADX < 20 and flat 60 days) | 1.56 | 1.33 | −24% | No (subset of the line above) |
+  | + Nifty in an uptrend / above its 50-day average | 1.42–1.48 | 1.29–1.30 | −27% | No |
+  | Weekly + monthly features in the model | 1.48–1.58 | 1.36–1.40 | −27% to −33% | No |
+  | Daily, weekly and monthly trends all up | 1.44 | 1.25 | −37% | No |
+  | Liquidity ≥ ₹10 / 25 / 50 cr a day | 1.17–1.42 | 1.17–1.27 | −25% to −35% | No |
+  | 1:2 reward-to-risk (5.0/2.5 or 4.0/2.0 ATR) | 1.56–1.61 | 1.31–1.33 | −29% to −32% | No: profitable trades fall to 46–48% |
+
+  The trend filter improves with every step from ADX 15 to 28 (profit factor 1.43 → 1.70), so it is not one lucky
+  number, but it removes about 30% of the trades and is better in only 8 of 18 single years. In the
+  dashboard's main 22-year run (next section) it lifts the profit factor from 1.46 to 1.54 overall but leaves 2016+
+  unchanged at 1.34, so most of its gain is before 2016. It is on (`TREND_ADX_MIN=20`); set it to `0` to turn it off.
+- **Is the edge luck?** 200 portfolios that picked 2% of the same liquid stocks at random on the same days scored a
+  median profit factor of 1.04 (best 1.20) since 2008; the live rule scored 1.32, above every random run (since 2016:
+  1.25, above 98% of them).
+- **Against Nifty buy-and-hold:** since 2008 the live rule returned 11.5% a year with a worst drawdown of −29%, Nifty
+  7.8% with −60%. Since 2016 it returned 10.2% a year against Nifty's 11.4%, with a smaller drawdown (−29% vs −38%),
+  partly because it sits in cash while the market gate is closed. With the trend filter: 12.6% and 11.0%, worst −22%.
+- **Is the probability honest?** Not as a raw number: the top tenth of ML scores predicted a 42% target-hit rate and
+  32% happened (2016+: 38% predicted, 34% happened). That is why the app ranks with the ML score but shows each pick's chance of
+  profit from what actually happened to similar past signals. The Backtest tab shows the full table.
 - **Added after testing** (`python -m app.research.feature_lab`): the 11 newer features above raised the live rule's
   profit factor from 1.50 to 1.66 on 2005–2015 data, where they were chosen, and from 1.30 to 1.34 on 2016–2026,
   with the worst drawdown down from −23% to −20%. Picks scored with them carry scoring version 9.
 
 ### 3. Market gate
 Buy calls are only made when **Nifty is above its 200-day average and more than 50% of liquid Nifty 500 stocks are above
-their own 200-day averages**. Six market filters were compared; this one was the best on 2005–2015 data (profit factor
+their own 200-day averages, and Nifty is trending (14-day ADX ≥ 20)**. Six market filters were compared for the first part; this one was the best on 2005–2015 data (profit factor
 1.53) and it held up on 2016–2026 data it was not chosen on. With the current model it scores profit factor 1.34 and a
-worst drawdown of −20% on 2016–2026.
+worst drawdown of −20% on 2016–2026. The trend part was added in Nov 2026 (scoring version 10, see the third research round):
+it raised the overall profit factor from 1.46 to 1.54 and left 2016–2026 at 1.34.
 
 ### 4. Research agent (veto only)
 200 past signals were shown to the LLM with the name, sector and dates hidden and prices rebased to 100. Its chart
@@ -176,7 +205,7 @@ so the same facts give the same verdict.
 ### 5. Decision rule
 | Call | Rule | Backed by (22-year test, delisted stocks included) |
 |---|---|---|
-| 🟢 **Buy** | top 2% of the daily ML ranking, market gate open, agent clear | 52.0% profitable, profit factor 1.46, worst drawdown −21% (2016+: 50.2%, 1.34, −20%) |
+| 🟢 **Buy** | top 2% of the daily ML ranking, market gate open (incl. Nifty trending), agent clear | 53.0% profitable, profit factor 1.54, worst drawdown −21% (2016+: 50.5%, 1.34, −21%) |
 | ⚪ **Watch** | anything that fails a gate | – |
 | 🔴 **Avoid** | confirmed red flag | – |
 
@@ -287,7 +316,8 @@ before 2016; 2016–2026 is the out-of-sample check.
 | ML top 2% | 4,357 | 50.3% | 1.27 | −65% | 1.25 |
 | ML top 2% + Nifty > 200-day average | 2,995 | 50.9% | 1.31 | −37% | 1.19 |
 | ML top 2% + 50-day breadth > 50% | 2,994 | 52.0% | 1.38 | −35% | 1.27 |
-| **ML top 2% + Nifty & 200-day breadth (live rule)** | **2,432** | **52.0%** | **1.46** | **−21%** | **1.34** |
+| ML top 2% + Nifty & 200-day breadth (rule until Nov 2026) | 2,432 | 52.0% | 1.46 | −21% | 1.34 |
+| **+ Nifty trending, ADX ≥ 20 (live rule)** | **1,789** | **53.0%** | **1.54** | **−21%** | **1.34** |
 
 With the scoring version 8 features (before the 11 newer ones) the live rule scored 51.6%, profit factor 1.38 and
 −23% on the same test.
@@ -321,6 +351,8 @@ python -m app.research.v2 odds pit        # chance-of-profit table shown on each
 python -m app.research.model_lab          # training recipes (then: model_lab seeds, for the luck range)
 python -m app.research.feature_lab2 extra # second round of chart features (then: feature_lab2 run)
 python -m app.research.trade_lab          # exit rules and graded market gates
+python -m app.research.v2 calib pit       # predicted vs actual table in the Backtest tab
+python -m app.research.edge_lab extra     # weekly / monthly features (then: edge_lab run, rules, luck)
 ```
 The same pipeline runs on today's Nifty 500 with `yahoo` instead of `pit` (after `python -m app.research.history`).
 
@@ -411,6 +443,7 @@ environment variables, never from this repo.
 | `AWS_REGION` | `us-east-1` | Bedrock region |
 | `BEDROCK_MODEL_ID` | `moonshotai.kimi-k2.5` | Any Bedrock model that supports the Converse API with tool use |
 | `HOLD_MAX_DAYS` | `20` | Time limit of a trade in sessions (trades last about 12 on average) |
+| `TREND_ADX_MIN` | `20` | No Buy calls while Nifty's 14-day ADX is below this (a sideways market); `0` turns it off |
 | `ROUND_TRIP_COST` | `0.003` | Trading cost per round trip used in the live track record (same 0.3% as the backtest) |
 | `TARGET_ATR` / `STOP_ATR` | `3.5` / `2.5` | Barrier distances in ATR multiples |
 | `ML_TOP_PCT` | `98` | Minimum ML percentile for a Buy (top 2%) |

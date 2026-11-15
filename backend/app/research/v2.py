@@ -22,8 +22,8 @@ from sklearn.metrics import brier_score_loss, roc_auc_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from ..config import HOLD_MAX_DAYS, STORAGE
-from ..features import (BASE_FEATURES, PRICE_FEATURES, V8_FEATURES, add_cross_sectional, barrier_outcomes, compute,
+from ..config import BREADTH_MIN, HOLD_MAX_DAYS, STORAGE, TREND_ADX_MIN
+from ..features import (BASE_FEATURES, PRICE_FEATURES, V8_FEATURES, _adx, add_cross_sectional, barrier_outcomes, compute,
                         next_open_outcomes)
 from ..universe import get_universe
 from .experiment import portfolio
@@ -218,9 +218,27 @@ def report(source: str = "pit") -> dict:
     return out
 
 
-def export(source: str = "pit", breadth_min: float = 0.5) -> dict:
-    """Dashboard summary of the live setting (ML top 2% + Nifty and breadth above their 200-day averages),
-    honest universe, realistic fills. The rule was chosen on pre-2016 data among the tested regimes."""
+def nifty_adx() -> pd.Series:
+    """Nifty's 14-day ADX by date (Yahoo has the index from Sept 2007; earlier dates are missing)."""
+    from .history import _path
+
+    n = pd.read_parquet(_path("^NSEI"))
+    return _adx(n).rename("n_adx")
+
+
+def live_gate(df: pd.DataFrame, breadth_min: float = BREADTH_MIN, trend_min: float = TREND_ADX_MIN) -> pd.Series:
+    """The live market gate on research rows: Nifty and breadth above their 200-day averages, and Nifty trending.
+    Days before the index has an ADX (2005-2007) pass the trend check, like the app does without the number."""
+    gate = df.mkt_above_200 & (df.breadth200 > breadth_min)
+    if trend_min:
+        adx = df.date.map(nifty_adx())
+        gate &= adx.isna() | (adx >= trend_min)
+    return gate
+
+
+def export(source: str = "pit", breadth_min: float = BREADTH_MIN) -> dict:
+    """Dashboard summary of the live setting (ML top 2% + Nifty and breadth above their 200-day averages + Nifty
+    trending), honest universe, realistic fills. Market filters were chosen on pre-2016 data."""
     data = pd.read_parquet(OUT / f"dataset_{source}.parquet")
     df = pd.read_parquet(OUT / f"walk_{source}.parquet").merge(data, on=["date", "symbol"], how="inner")
     df = df[df.traded_value_20 > 1e7].dropna(subset=["r_open"])
@@ -230,10 +248,11 @@ def export(source: str = "pit", breadth_min: float = 0.5) -> dict:
     rnd = df[df.groupby("date").p_rand.rank(pct=True) >= 0.98].assign(prob=lambda x: x.p_rand)
     top = df[df.pct_gbm >= 0.98].assign(prob=lambda x: x.p_gbm)
     variants = {"Random pick (same universe)": rnd, "ML top 2%": top,
-                "ML + Nifty & breadth above 200-day averages (live setting)":
-                    top[top.mkt_above_200 & (top.breadth200 > breadth_min)]}
+                "ML + Nifty & breadth above 200-day averages (rule until Nov 2026)":
+                    top[live_gate(top, breadth_min, trend_min=0)],
+                "ML + market gate + Nifty trending (live setting)": top[live_gate(top, breadth_min)]}
     out = {"source": source, "target_atr": TARGET, "stop_atr": STOP, "split": SPLIT, "cost": COST_REAL,
-           "entry": "next-day open with gap fills", "breadth_min": breadth_min,
+           "entry": "next-day open with gap fills", "breadth_min": breadth_min, "trend_adx_min": TREND_ADX_MIN,
            "survivorship_free": source == "pit", "symbols": int(data.symbol.nunique()),
            "from": str(df.date.min().date()), "to": str(df.date.max().date()), "variants": []}
     for name, sig in variants.items():
@@ -262,7 +281,7 @@ def odds(source: str = "pit") -> dict:
     df = df[df.traded_value_20 > 1e7].dropna(subset=["r_open"])
     df["net"] = df.r_open - COST_REAL
     df["pct"] = np.floor(df.pct_gbm * 100)
-    gate = df.mkt_above_200 & (df.breadth200 > 0.5)
+    gate = live_gate(df)  # same gate as the app, so "gate open" odds describe the days a Buy can happen
     rows, hi = [], 101
     for lo, label in ODDS_BUCKETS:
         for is_open in (True, False):
@@ -286,6 +305,37 @@ def odds(source: str = "pit") -> dict:
     return out
 
 
+CALIBRATION_PATH = STORAGE / "research" / "calibration.json"
+
+
+def calibration_table(source: str = "pit", liquid: float = 5e7) -> dict:
+    """Is the model's probability honest? Out-of-sample signals (each scored by a model that had not seen it)
+    grouped by predicted probability: the predicted target-hit rate next to the one that actually happened, and
+    the share that closed in profit after the 0.3% cost. Shown in the Backtest tab."""
+    cols = ["date", "symbol", "y_open", "r_open", "traded_value_20"]
+    df = pd.read_parquet(OUT / f"walk_{source}.parquet", columns=["date", "symbol", "p_gbm", "pct_gbm"]).merge(
+        pd.read_parquet(OUT / f"dataset_{source}.parquet", columns=cols), on=["date", "symbol"], how="inner")
+    df = df[df.traded_value_20 >= liquid].dropna(subset=["y_open", "r_open"])
+
+    def table(d: pd.DataFrame) -> list[dict]:
+        bins = pd.qcut(d.p_gbm.rank(method="first"), 10, labels=False)
+        rows = []
+        for b, g in d.groupby(bins):
+            rows.append({"decile": int(b) + 1, "signals": len(g),
+                         "predicted": round(float(g.p_gbm.mean()), 4), "actual_target": round(float(g.y_open.mean()), 4),
+                         "actual_profit": round(float((g.r_open - COST_REAL > 0).mean()), 4)})
+        top = d[d.pct_gbm >= 0.98]
+        rows.append({"decile": "top 2%", "signals": len(top), "predicted": round(float(top.p_gbm.mean()), 4),
+                     "actual_target": round(float(top.y_open.mean()), 4),
+                     "actual_profit": round(float((top.r_open - COST_REAL > 0).mean()), 4)})
+        return rows
+
+    out = {"from": str(df.date.min().date()), "to": str(df.date.max().date()), "cost": COST_REAL, "split": SPLIT,
+           "all": table(df), "since_split": table(df[df.date >= SPLIT])}
+    CALIBRATION_PATH.write_text(json.dumps(out, indent=1))
+    return out
+
+
 if __name__ == "__main__":
     import warnings
 
@@ -296,6 +346,10 @@ if __name__ == "__main__":
         build(src)
     elif cmd == "walk":
         walk(src)
+    elif cmd == "calib":
+        r = calibration_table(src)
+        print(pd.DataFrame(r["all"]).to_string(index=False))
+        print(pd.DataFrame(r["since_split"]).to_string(index=False))
     elif cmd == "odds":
         print(pd.DataFrame(odds(src)["rows"]).to_string(index=False))
     elif cmd == "export":

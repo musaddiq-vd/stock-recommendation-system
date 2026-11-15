@@ -128,7 +128,7 @@ def performance(version: str, recent: int = 25) -> dict:
     with conn() as c:
         rows = [dict(r) for r in c.execute(
             "SELECT symbol, as_of, tier, entry, target, stop_loss, outcome, outcome_ret, outcome_days, "
-            "json_extract(data, '$.gates.agent') AS agent_clear, "
+            "json_extract(data, '$.gates.agent') AS agent_clear, json_extract(data, '$.odds.win') AS expected_win, "
             "json_extract(data, '$.gates.ml_top') AND json_extract(data, '$.gates.market') AS market_gates "
             "FROM picks "
             "WHERE id IN (SELECT MAX(id) FROM picks GROUP BY symbol, as_of) AND outcome IS NOT 'retired' "
@@ -141,10 +141,31 @@ def performance(version: str, recent: int = 25) -> dict:
     # If vetoed picks do as well as cleared ones, the veto is not earning its keep.
     eligible = [r for r in rows if r["market_gates"]]
     agent = {k: _stats(g) for k, g in _group(eligible, lambda r: "cleared" if r["agent_clear"] else "vetoed").items()}
-    closed = [{k: v for k, v in r.items() if k not in ("agent_clear", "market_gates")}
+    closed = [{k: v for k, v in r.items() if k not in ("agent_clear", "market_gates", "expected_win")}
               for r in rows if r["outcome"] in CLOSED][:recent]
     return {"version": version, "tiers": tiers, "agent_check": agent, "recent": closed,
-            "earlier_version_picks": legacy}
+            "earlier_version_picks": legacy,
+            "live_vs_expected": live_vs_expected([r for r in rows if r["tier"] == "strong"])}
+
+
+DRIFT_MIN_TRADES = 20
+
+
+def live_vs_expected(rows: list[dict]) -> dict:
+    """Closed Buy picks: share that closed in profit after costs, next to what the chance of profit shown on
+    those same picks predicted. A gap of more than two standard errors either way is reported, so a model that
+    stops working is noticed instead of trusted (the daily job sends an alert when it falls below)."""
+    closed = [r for r in rows if r["outcome"] in CLOSED and r.get("expected_win") is not None]
+    n = len(closed)
+    if not n:
+        return {"closed": 0, "status": "waiting"}
+    actual = sum((r["outcome_ret"] or 0) - ROUND_TRIP_COST > 0 for r in closed) / n
+    expected = sum(r["expected_win"] for r in closed) / n
+    se = (expected * (1 - expected) / n) ** 0.5
+    z = (actual - expected) / se if se else 0.0
+    status = "too_few" if n < DRIFT_MIN_TRADES else "below" if z < -2 else "above" if z > 2 else "in_line"
+    return {"closed": n, "actual": round(actual, 3), "expected": round(expected, 3), "z": round(z, 2),
+            "band": [round(max(0.0, expected - 2 * se), 3), round(min(1.0, expected + 2 * se), 3)], "status": status}
 
 
 def _group(rows, key):

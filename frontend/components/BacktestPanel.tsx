@@ -15,9 +15,16 @@ interface Report {
   top_features: [string, number][];
 }
 interface TierRecord { closed: number; open: number; win_rate: number | null; target_rate: number | null; avg_ret: number | null }
+interface LiveVsExpected {
+  closed: number; status: "waiting" | "too_few" | "in_line" | "below" | "above";
+  actual?: number; expected?: number; z?: number; band?: [number, number];
+}
+interface CalRow { decile: number | string; signals: number; predicted: number; actual_target: number; actual_profit: number }
+interface Calibration { from: string; to: string; split: string; all: CalRow[]; since_split: CalRow[] }
 interface Track {
   version: string;
   earlier_version_picks: number;
+  live_vs_expected?: LiveVsExpected;
   tiers: Record<string, TierRecord>;
   agent_check?: Partial<Record<"cleared" | "vetoed", TierRecord>>;
   recent: { symbol: string; as_of: string; tier: string; outcome: string; outcome_ret: number | null; outcome_days: number | null }[];
@@ -30,15 +37,18 @@ const TIER_NAME: Record<string, string> = { strong: "Buy", good: "Good (older ru
 export default function BacktestPanel() {
   const [s, setS] = useState<Report | null | undefined>(undefined);
   const [track, setTrack] = useState<Track | null>(null);
+  const [cal, setCal] = useState<Calibration | null>(null);
   useEffect(() => {
     get<Report>("/api/backtest").then(setS).catch(() => setS(null));
     get<Track>("/api/performance").then(setTrack).catch(() => setTrack(null));
+    get<Calibration>("/api/calibration").then(setCal).catch(() => setCal(null));
   }, []);
 
   return (
     <div className="space-y-4">
       <TrackRecord t={track} />
       <LongTermBacktest />
+      {cal && <CalibrationTable c={cal} />}
       <div className="text-sm font-semibold text-zinc-200 pt-2">Latest model: last 12 months out-of-sample</div>
       {s === undefined ? <div className="text-sm text-zinc-500">Loading…</div> : !s ? <div className="text-sm text-zinc-500">Model report not found.</div> : !s.portfolio ? (
         <div className="text-sm text-zinc-500">Portfolio backtest not available yet. It appears here after the next model retrain.</div>
@@ -102,6 +112,7 @@ function TrackRecord({ t }: { t: Track | null }) {
           })}
         </div>
       )}
+      {t.live_vs_expected && <LiveVsBacktest d={t.live_vs_expected} />}
       {t.agent_check && (t.agent_check.cleared || t.agent_check.vetoed) && (
         <div className="rounded-lg border border-zinc-800 p-3 text-xs">
           <div className="text-zinc-200 font-semibold">Agent veto check</div>
@@ -146,6 +157,81 @@ function TrackRecord({ t }: { t: Track | null }) {
       {t.recent.length > 0 && t.recent.length < 30 && (
         <div className="text-[11px] text-zinc-500">Too few closed trades to judge yet; treat these numbers as early evidence only.</div>
       )}
+    </div>
+  );
+}
+
+/** Live Buy results next to the chance of profit those same picks were shown with. */
+function LiveVsBacktest({ d }: { d: LiveVsExpected }) {
+  const tone = d.status === "below" ? "border-red-900 bg-red-950/30" : d.status === "above" ? "border-emerald-800 bg-emerald-950/20" : "border-zinc-800";
+  const verdict: Record<LiveVsExpected["status"], string> = {
+    waiting: "No Buy trade has closed yet.",
+    too_few: `Only ${d.closed} closed Buy trades: too few to judge (needs 20).`,
+    in_line: "Live results are within the normal range of the backtest.",
+    below: "Live results are clearly BELOW the backtest. Review the model before trusting new calls; an alert has been sent.",
+    above: "Live results are clearly above the backtest so far. Do not expect this to last.",
+  };
+  return (
+    <div className={`rounded-lg border p-3 text-xs ${tone}`}>
+      <div className="font-semibold text-zinc-200">Live vs backtest (Buy calls)</div>
+      {d.actual != null && d.expected != null && d.band && (
+        <div className="mt-1 text-zinc-300">
+          {(d.actual * 100).toFixed(0)}% of {d.closed} closed trades made a profit after costs; the chance of profit shown on those picks averaged{" "}
+          {(d.expected * 100).toFixed(0)}% (normal range {(d.band[0] * 100).toFixed(0)}–{(d.band[1] * 100).toFixed(0)}% for this many trades).
+        </div>
+      )}
+      <div className={`mt-1 ${d.status === "below" ? "text-red-300" : "text-zinc-500"}`}>{verdict[d.status]}</div>
+    </div>
+  );
+}
+
+/** Is the model's probability honest? Predicted vs actual, out-of-sample. */
+function CalibrationTable({ c }: { c: Calibration }) {
+  const [recent, setRecent] = useState(false);
+  const rows = recent ? c.since_split : c.all;
+  return (
+    <div className="rounded-xl border border-zinc-800 p-4 space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-semibold text-white">Model probability vs what actually happened</div>
+        <div className="inline-flex rounded-lg border border-zinc-800 p-0.5 text-xs">
+          {[false, true].map((r) => (
+            <button key={String(r)} onClick={() => setRecent(r)} aria-pressed={recent === r}
+              className={`rounded-md px-2.5 py-1 ${recent === r ? "bg-emerald-600 text-white" : "text-zinc-400"}`}>
+              {r ? `Since ${c.split.slice(0, 4)}` : `${c.from.slice(0, 4)}–${c.to.slice(0, 4)}`}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-xs text-zinc-400">
+        Every past signal was scored by a model that had not seen it, then grouped by its predicted chance of reaching the target. If the model is
+        honest, the two middle columns match. The ML score is used to rank stocks; the chance of profit on each card comes from the right-hand
+        column, not from the raw score.
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="text-zinc-500">
+            <tr>
+              <th className="py-1 text-left">Group</th><th className="text-right">Signals</th><th className="text-right">Predicted target hit</th>
+              <th className="text-right">Actual target hit</th><th className="text-right">Closed in profit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const gap = r.actual_target - r.predicted;
+              return (
+                <tr key={String(r.decile)} className={`border-t border-zinc-800 ${typeof r.decile === "string" ? "font-semibold text-emerald-300" : "text-zinc-300"}`}>
+                  <td className="py-1">{typeof r.decile === "string" ? `ML ${r.decile}` : `Decile ${r.decile}`}</td>
+                  <td className="text-right">{r.signals.toLocaleString("en-IN")}</td>
+                  <td className="text-right">{(r.predicted * 100).toFixed(0)}%</td>
+                  <td className={`text-right ${Math.abs(gap) > 0.05 ? "text-amber-300" : ""}`}>{(r.actual_target * 100).toFixed(0)}%</td>
+                  <td className="text-right">{(r.actual_profit * 100).toFixed(0)}%</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-[11px] text-zinc-500">Amber: actual differs from predicted by more than 5 points.</div>
     </div>
   );
 }

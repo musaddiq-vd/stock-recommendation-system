@@ -165,7 +165,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
   const running = scan?.status === "running" || scanId !== null;
   const topPick = scan?.status === "done" ? longs.find((p) => p.top_pick) : undefined;
   const sm = scan?.market;
-  const gateOpen = sm?.breadth200 != null ? sm.above_ema200 && sm.breadth200 > 0.5 : null;
+  const gateOpen = sm?.gate_open ?? (sm?.breadth200 != null ? sm.above_ema200 && sm.breadth200 > 0.5 : null);
   const latestDone = scans.find((s) => s.status === "done");
   const older = !!scan && scan.status === "done" && !!latestDone && scan.id < latestDone.id;
   const closeDrawer = useCallback(() => setOpen(null), []);
@@ -213,10 +213,16 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
                 <Chip tone={market.regime === "bullish" ? "good" : market.regime === "bearish" ? "bad" : undefined}>
                   <span className="capitalize">{market.regime}</span>
                 </Chip>
+                {market.adx != null && (
+                  <Chip tone={market.trend === "sideways" ? "warn" : undefined}
+                    title="Strength of the Nifty trend (14-day ADX). Below 20 the market is moving sideways, where swing trades worked less well in the 22-year test.">
+                    {market.trend === "sideways" ? "Sideways" : "Trending"} <span className="text-zinc-500">ADX {market.adx.toFixed(0)}</span>
+                  </Chip>
+                )}
               </>
             )}
             {gateOpen != null && (
-              <Chip tone={gateOpen ? "good" : "warn"} title="Buy calls need Nifty and more than half of the stocks above their 200-day averages">
+              <Chip tone={gateOpen ? "good" : "warn"} title="Buy calls need Nifty and more than half of the stocks above their 200-day averages, and a trending Nifty (ADX ≥ 20)">
                 <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full align-middle ${gateOpen ? "bg-emerald-400" : "bg-amber-400"}`} />
                 Market gate {gateOpen ? "open" : "closed"}
               </Chip>
@@ -301,6 +307,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
                       value={gateOpen == null ? "–" : gateOpen ? "Open" : "Closed"}
                       sub={sm?.breadth200 != null
                         ? `Nifty ${sm.above_ema200 ? "above" : "below"} 200-day avg · breadth ${Math.round(sm.breadth200 * 100)}%`
+                          + (sm.trend_adx_min ? ` · ADX ${sm.adx?.toFixed(0)} (needs ${sm.trend_adx_min})` : "")
                         : "Not measured in this scan"} />
                     <Tile label="Buy calls" value={String(counts.strong || 0)} tone={counts.strong ? "good" : undefined}
                       sub={gateOpen === false ? "None while the gate is closed" : `of ${counts.all} stocks researched`} />
@@ -383,7 +390,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
 
                 <footer className="rounded-xl border border-zinc-800 p-4 text-xs text-zinc-400">
                   <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                    <Legend cls="bg-emerald-500" t="Buy: top 2% ML rank, Nifty and > 50% of stocks above their 200-day averages, agent clear" />
+                    <Legend cls="bg-emerald-500" t="Buy: top 2% ML rank, Nifty and > 50% of stocks above their 200-day averages, Nifty trending, agent clear" />
                     <Legend cls="bg-zinc-600" t="Watch: one of the checks failed" />
                     <Legend cls="bg-red-700" t="Avoid: confirmed red flag" />
                   </div>

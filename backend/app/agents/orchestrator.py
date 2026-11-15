@@ -16,13 +16,13 @@ import pandas as pd
 from .. import alerts, db
 from ..config import (AGENT_TOP_N, BREADTH_MIN, HOLD_MAX_DAYS, HOLD_MIN_DAYS, MIN_AVG_TRADED_VALUE,
                       ML_TOP_PCT,
-                      SCORING_VERSION,
-                      STOP_ATR, STORAGE)
+                      SCORING_VERSION, SIDEWAYS_ADX,
+                      STOP_ATR, STORAGE, TREND_ADX_MIN)
 from ..data import nse
 from ..data.events import window_event
 from ..data.live import live_quotes
 from ..data.prices import benchmark, load_many
-from ..features import add_cross_sectional, compute
+from ..features import _adx, add_cross_sectional, compute
 from ..model.train import load_model
 from ..research.rubric_proxy import proxy_components
 from ..universe import get_index, get_universe
@@ -49,8 +49,19 @@ def market_regime() -> dict:
         regime = "bearish"
     else:
         regime = "neutral"
+    adx = float(_adx(b).iloc[-1])  # strength of the Nifty trend, whatever its direction
     return {"nifty": round(last, 2), "ret_20d_pct": round(ret20 * 100, 2), "above_ema200": bool(last > ema200),
-            "regime": regime, "date": str(c.index[-1].date())}
+            "regime": regime, "adx": round(adx, 1), "trend": "trending" if adx >= SIDEWAYS_ADX else "sideways",
+            "date": str(c.index[-1].date())}
+
+
+def gate_open(market: dict) -> bool:
+    """The market gate behind every Buy call: Nifty and breadth above their 200-day averages, plus the optional
+    trend filter (TREND_ADX_MIN). One function, so the scan, chat and alerts never disagree."""
+    ok = bool(market.get("above_ema200")) and (market.get("breadth200") or 0) > BREADTH_MIN
+    if TREND_ADX_MIN and market.get("adx") is not None:
+        ok = ok and market["adx"] >= TREND_ADX_MIN
+    return ok
 
 
 def score_universe() -> pd.DataFrame:
@@ -127,7 +138,7 @@ def judge(row, market: dict, res: dict, ml_pct: int) -> dict:
     agent_ok = (not res.get("parse_error") and not res.get("red_flags") and res.get("news_sentiment") != "negative"
                 and not res.get("event_in_window"))
     gates = {"ml_top": ml_pct >= ML_TOP_PCT,
-             "market": bool(market.get("above_ema200")) and market.get("breadth200", 0) > BREADTH_MIN,
+             "market": gate_open(market),
              "agent": bool(agent_ok)}
     verdict = "avoid" if res.get("red_flags") else "buy" if agent_ok else "watch"
     return {"score": float(ml_pct), "verdict": verdict, "gates": gates, "tier": tier(verdict, gates),
@@ -171,6 +182,8 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
         # market breadth: share of liquid Nifty 500 stocks above their 200-day average
         liquid = scored[scored.traded_value_20 >= MIN_AVG_TRADED_VALUE]
         market["breadth200"] = round(float((liquid.dist_ema200 > 0).mean()), 3)
+        market["gate_open"] = gate_open(market)
+        market["trend_adx_min"] = TREND_ADX_MIN
         db.update_scan(scan_id, market=market)
         members = set(get_index(universe).symbol)
         # only stocks with a bar for the latest session: a pick must be judged on today's data, not a stale bar

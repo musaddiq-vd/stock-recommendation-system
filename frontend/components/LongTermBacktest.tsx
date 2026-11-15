@@ -7,7 +7,7 @@ interface Stats { trades: number; win_rate: number; avg_trade: number; profit_fa
 interface Variant extends Stats { name: string; yearly: Record<string, number>; holdout: Stats | null; equity: { date: string; value: number }[] }
 interface LlmBucket { n: number; win_rate: number; avg_ret: number }
 interface Research {
-  from: string; to: string; split: string; target_atr: number; stop_atr: number; breadth_min: number;
+  from: string; to: string; split: string; target_atr: number; stop_atr: number; breadth_min: number; trend_adx_min?: number;
   survivorship_free?: boolean; symbols?: number; cost?: number; variants: Variant[];
   llm_test?: { n: number; base_win_rate: number; auc: number | null } & Record<string, LlmBucket | number | null>;
 }
@@ -53,7 +53,7 @@ export default function LongTermBacktest() {
         <p className="text-xs text-zinc-400 mt-1">
           Every year is traded by a model trained only on earlier years. Live setting: target {r.target_atr}× ATR, stop {r.stop_atr}× ATR,
           top 2% of the ML ranking, only when Nifty and more than {Math.round(r.breadth_min * 100)}% of stocks are above their 200-day
-          averages (chosen on pre-2016 data among six market filters).
+          averages (chosen on pre-2016 data among six market filters){r.trend_adx_min ? <> and Nifty is trending (ADX ≥ {r.trend_adx_min}, added Nov 2026)</> : null}.
           Bought at the next day&apos;s open with gap fills, {((r.cost ?? 0.003) * 100).toFixed(1)}% cost per trade.
           {r.survivorship_free && <> Universe: the {r.symbols} stocks that were in the top 500 at the time, including later-delisted ones.</>}
           {" "}Rules were chosen on data

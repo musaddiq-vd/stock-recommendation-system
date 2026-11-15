@@ -100,6 +100,49 @@ def test_scan_history_says_what_each_scan_found():
     assert "progress" not in rows[sid]
 
 
+def test_live_vs_expected_flags_a_model_that_stops_working():
+    from app import db
+
+    def rows(wins, losses, p=0.52):
+        return ([{"outcome": "target", "outcome_ret": 0.08, "expected_win": p}] * wins
+                + [{"outcome": "stop", "outcome_ret": -0.06, "expected_win": p}] * losses)
+
+    assert db.live_vs_expected([])["status"] == "waiting"
+    assert db.live_vs_expected(rows(3, 2))["status"] == "too_few"
+    assert db.live_vs_expected(rows(26, 24))["status"] == "in_line"  # 52% vs 52% expected
+    low = db.live_vs_expected(rows(12, 38))  # 24% vs 52%: far outside two standard errors
+    assert low["status"] == "below" and low["actual"] == 0.24 and low["band"][0] > 0.24
+    assert db.live_vs_expected(rows(40, 10))["status"] == "above"
+    # a trade that only made 0.2% is a loss after the 0.3% cost
+    flat = [{"outcome": "timeout", "outcome_ret": 0.002, "expected_win": 0.5}] * 25
+    assert db.live_vs_expected(flat)["actual"] == 0.0
+
+
+def test_drift_alert_is_sent_only_when_results_fall_below(monkeypatch):
+    sent = []
+    monkeypatch.setattr(main.alerts, "ops_alert", lambda key, text: sent.append((key, text)))
+    for status, expect in (("in_line", 0), ("too_few", 0), ("below", 1)):
+        d = {"status": status, "closed": 50, "actual": 0.24, "expected": 0.52, "band": [0.38, 0.66]}
+        monkeypatch.setattr(main.db, "performance", lambda v, d=d: {"live_vs_expected": d})
+        sent.clear()
+        main.check_model_drift()
+        assert len(sent) == expect
+    assert sent[0][0].startswith("drift:") and "24%" in sent[0][1] and "52%" in sent[0][1]
+
+
+def test_market_gate_with_optional_trend_filter(monkeypatch):
+    from app.agents import orchestrator
+
+    trending = {"above_ema200": True, "breadth200": 0.6, "adx": 32.0}
+    sideways = {**trending, "adx": 14.0}
+    assert orchestrator.TREND_ADX_MIN == 20  # on by default since scoring version 10
+    assert orchestrator.gate_open(trending) and not orchestrator.gate_open(sideways)
+    assert not orchestrator.gate_open({**trending, "breadth200": 0.45})
+    assert orchestrator.gate_open({"above_ema200": True, "breadth200": 0.6})  # older market data without ADX
+    monkeypatch.setattr(orchestrator, "TREND_ADX_MIN", 0.0)  # TREND_ADX_MIN=0 turns the filter off
+    assert orchestrator.gate_open(sideways)
+
+
 def test_buy_alert_is_honest_about_the_odds():
     from app import alerts
 
