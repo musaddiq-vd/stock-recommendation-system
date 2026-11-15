@@ -21,6 +21,7 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, 
   const [paperMsg, setPaperMsg] = useState("");
   const [paperOk, setPaperOk] = useState(false);
   const [paperBusy, setPaperBusy] = useState(false);
+  const [chartState, setChartState] = useState<"loading" | "ready" | "error">("loading");
 
   async function paperTrade() {
     if (paperBusy) return; // the server fetches a live price first: a second click must not open a second trade
@@ -48,8 +49,10 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, 
   useEffect(() => {
     let chart: ReturnType<typeof createChart> | null = null;
     let cancelled = false;
+    setChartState("loading");
     get<{ candles: Candle[]; fundamentals: Record<string, unknown> }>(`/api/stock/${pick.symbol}`).then((d) => {
       if (cancelled || !ref.current) return;
+      setChartState("ready");
       setFund(d.fundamentals || {});
       chart = createChart(ref.current, {
         layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#a1a1aa" },
@@ -68,6 +71,8 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, 
       s.createPriceLine({ price: L.entry, color: "#a1a1aa", lineStyle: LineStyle.Dotted, title: "Entry", lineWidth: 1 });
       s.createPriceLine({ price: L.stop_loss, color: "#ef4444", lineStyle: LineStyle.Dashed, title: "Stop", lineWidth: 1 });
       chart.timeScale().fitContent();
+    }).catch(() => {
+      if (!cancelled) setChartState("error"); // the rest of the drawer still works from the scan's own data
     });
     return () => {
       cancelled = true;
@@ -132,7 +137,14 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, 
           </div>
         )}
 
-        <div ref={ref} className="mt-4 w-full h-[320px]" />
+        <div className="relative mt-4 h-[320px] w-full">
+          <div ref={ref} className="h-full w-full" />
+          {chartState !== "ready" && (
+            <div className="absolute inset-0 flex items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900/40 text-sm text-zinc-500">
+              {chartState === "loading" ? <span className="animate-pulse">Loading chart…</span> : "Price chart is not available right now."}
+            </div>
+          )}
+        </div>
 
         <div className="grid grid-cols-3 gap-2 mt-2 text-sm">
           <Stat k="Reference (last close)" v={`₹${pick.levels.entry}`} />
