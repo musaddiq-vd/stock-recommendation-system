@@ -19,7 +19,7 @@ researches each one with LLM agents, and tracks every call against real market d
 
 <br/>
 
-<img src="docs/screenshots/dashboard.png" alt="Dashboard with the navigation rail, market status, the top pick of the day and pick cards" width="100%"/>
+<img src="docs/screenshots/dashboard.png" alt="Dashboard with the navigation rail, market status and trend, the top pick of the day with its risk badge, and pick cards" width="100%"/>
 
 </div>
 
@@ -33,14 +33,14 @@ researches each one with LLM agents, and tracks every call against real market d
 
 | | |
 |---|---|
-| **Stock detail:** chance of winning from similar past signals, chart with entry / target / stop, risk-based size and rubric | **Research chat:** reads the latest scan and lists the Buy calls, or says why there are none |
+| **Stock detail:** why the model ranks the stock (SHAP), risk badge, Yahoo / NSE price check and the four-step trade plan | **Research chat:** reads the latest scan and lists the Buy calls, or says why there are none |
 | <img src="docs/screenshots/stock-detail.png" alt="Stock detail drawer"/> | <img src="docs/screenshots/chat.png" alt="Research chat answer"/> |
 | **Sector heatmap:** tiles sized by turnover; click a sector to see its stocks | **Rotation map:** which sectors are leading, weakening, lagging or improving vs the market |
 | <img src="docs/screenshots/heatmap-tiles.png" alt="Sector heatmap tiles"/> | <img src="docs/screenshots/rotation-map.png" alt="Sector rotation map"/> |
-| **Backtest:** live track record and the 22-year survivorship-free walk-forward | **Mobile:** the same dashboard on a phone, pages in a bottom bar, chat behind a button |
+| **Backtest:** the 22-year survivorship-free walk-forward, old rule vs the live rule with the trend filter | **Mobile:** the same dashboard on a phone, pages in a bottom bar, chat behind a button |
 | <img src="docs/screenshots/backtest.png" alt="Backtest tab"/> | <img src="docs/screenshots/mobile.png" alt="Mobile view" width="60%"/> |
 
-<sub>Dashboard, stock detail, chat, backtest and mobile: local run on 14 Nov 2026 (market gate open, 9 Buy calls). Heatmap and rotation map: 9 Nov 2026. Market data only; not advice.</sub>
+<sub>Dashboard, stock detail, backtest and mobile: local run on 15 Nov 2026 with data to 13 Nov (market gate open, Nifty trending, 6 Buy calls). Chat: 14 Nov 2026. Heatmap and rotation map: 9 Nov 2026. Market data only; not advice.</sub>
 
 ---
 
