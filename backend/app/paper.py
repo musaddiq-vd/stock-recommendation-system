@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 
 from . import alerts, db
-from .config import HOLD_MAX_DAYS
+from .config import HOLD_MAX_DAYS, ROUND_TRIP_COST
 from .data.live import live_quotes
 from .data.prices import load_many
 
@@ -13,12 +13,13 @@ EMOJI = {"target": "🎯", "stop": "🛑", "timeout": "⏱", "closed": "✋"}
 
 def _exit(t, status, price, date):
     sgn = 1 if t["side"] == "long" else -1
-    pnl = round(sgn * (price - t["entry"]) * t["qty"], 2)
+    # net of the same 0.3% round-trip cost as the backtest and the live track record
+    pnl = round(sgn * (price - t["entry"]) * t["qty"] - ROUND_TRIP_COST * t["entry"] * t["qty"], 2)
     db.update_paper(t["id"], status=status, exit_price=round(price, 2), exit_date=str(date), pnl=pnl,
                     last_price=round(price, 2))
     alerts.send_once(f"paper:{t['id']}:{status}",
                      f"{EMOJI[status]} <b>Paper trade {status.upper()}</b>: {t['side'].upper()} {t['symbol']} × {t['qty']}\n"
-                     f"Entry ₹{t['entry']} → Exit ₹{price:.2f} · P&L <b>₹{pnl:,.0f}</b>")
+                     f"Entry ₹{t['entry']} → Exit ₹{price:.2f} · P&L after costs <b>₹{pnl:,.0f}</b>")
     return pnl
 
 
@@ -108,9 +109,17 @@ class TradeRejected(ValueError):
     pass
 
 
-def open_trade(symbol: str, qty: int, target: float, stop_loss: float, scan_id: int | None = None) -> dict:
+def open_trade(symbol: str, qty: int, target: float, stop_loss: float, scan_id: int | None = None,
+               ref_price: float | None = None) -> dict:
     """Open at the current price, not the scan's close: a trade opened days later must not inherit moves
-    that already happened. Rejected if the price has already passed the target or the stop."""
+    that already happened.
+
+    With `ref_price` (the close the pick's levels were measured from) the target and stop move with the
+    fill and keep their distances, the same rule as the backtest and the live track record. Without it the
+    levels are taken as given and the trade is rejected if the price has already passed one of them.
+    One open trade per stock, like the backtest portfolio."""
+    if any(t["symbol"] == symbol for t in db.list_paper("open")):
+        raise TradeRejected(f"A paper trade in {symbol} is already open. Close it before opening another.")
     daily = load_many([symbol]).get(symbol)
     if daily is None or daily.empty:
         raise TradeRejected(f"No price data for {symbol}")
@@ -118,8 +127,11 @@ def open_trade(symbol: str, qty: int, target: float, stop_loss: float, scan_id: 
     q = live_quotes([symbol]).get(symbol)
     if q and q["date"] >= on:
         price, on = q["last"], q["date"]
-    if not (stop_loss < price < target):
+    if ref_price:
+        shift = price - ref_price
+        target, stop_loss = round(target + shift, 2), round(stop_loss + shift, 2)
+    if not (0 < stop_loss < price < target):
         raise TradeRejected(f"Price ₹{price:.2f} is already outside stop ₹{stop_loss} / target ₹{target}")
     tid = db.add_paper({"symbol": symbol, "side": "long", "qty": qty, "lots": None, "entry": round(price, 2),
                         "target": target, "stop_loss": stop_loss, "opened_on": on, "scan_id": scan_id})
-    return {"id": tid, "entry": round(price, 2), "opened_on": on}
+    return {"id": tid, "entry": round(price, 2), "opened_on": on, "target": target, "stop_loss": stop_loss}

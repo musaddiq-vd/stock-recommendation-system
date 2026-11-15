@@ -106,7 +106,7 @@ def list_scans(limit=20):
 def open_picks():
     with conn() as c:
         return [dict(r) for r in c.execute("SELECT * FROM picks WHERE outcome IS NULL OR outcome='open'").fetchall()]
-        # "skipped" (gapped past a level before entry) and closed outcomes are final
+        # closed outcomes are final ("skipped" only exists on rows measured by an older method)
 
 
 def set_outcome(pick_id, outcome, ret, days):
@@ -177,7 +177,7 @@ DEFAULT_SETTINGS = {"capital": "500000", "risk_pct": "1", "alerts_enabled": "1",
                     "telegram_bot_token": "", "telegram_chat_id": ""}
 
 
-OUTCOME_METHOD = "next-open-gap-v1"  # change when the way outcomes are measured changes
+OUTCOME_METHOD = "next-open-fill-levels-v2"  # change when the way outcomes are measured changes
 
 
 def init_extra():

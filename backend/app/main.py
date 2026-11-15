@@ -421,6 +421,7 @@ class PaperReq(BaseModel):
     target: float = Field(gt=0)
     stop_loss: float = Field(gt=0)
     scan_id: int | None = None
+    ref_price: float | None = Field(default=None, gt=0)  # the close the levels were measured from
 
 
 @app.get("/api/paper")
@@ -438,7 +439,7 @@ def paper_open(req: PaperReq):
     if req.target <= req.stop_loss:
         raise HTTPException(400, "Target must be above the stop-loss for a buy trade")
     try:
-        return paper.open_trade(_symbol(req.symbol), req.qty, req.target, req.stop_loss, req.scan_id)
+        return paper.open_trade(_symbol(req.symbol), req.qty, req.target, req.stop_loss, req.scan_id, req.ref_price)
     except paper.TradeRejected as e:
         raise HTTPException(400, str(e))
 

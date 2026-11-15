@@ -53,6 +53,7 @@ export default function PaperPanel({ refreshKey, onPicks }: { refreshKey: number
       <div className="flex items-center justify-between">
         <div className="text-xs text-zinc-500">
           Trades auto-close at target, stop or the 20-day timeout (checked every 15 min during market hours). Prices are ~15 min delayed.
+          Closed trades are shown after the 0.3% trading cost; one open trade per stock.
         </div>
         <button onClick={load} disabled={busy} className="text-xs rounded border border-zinc-700 px-2 py-1 text-zinc-300">{busy ? "Refreshing…" : "Refresh"}</button>
       </div>

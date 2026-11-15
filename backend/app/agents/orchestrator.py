@@ -258,20 +258,27 @@ def start_scan(universe="NIFTY100", sector=None, top_n=AGENT_TOP_N) -> int:
     return scan_id
 
 
+def fill_levels(ref: float, target: float, stop: float, fill: float) -> tuple[float, float]:
+    """(stop, target) for a trade actually bought at `fill`: the published levels were measured from the
+    reference close `ref`, so they move with the fill and keep their rupee distances (ATR multiples)."""
+    shift = fill - ref
+    return stop + shift, target + shift
+
+
 def evaluate(p: dict, bars: pd.DataFrame, quote: dict | None) -> tuple[str, float | None, int]:
     """Outcome of one long pick as a user could actually trade it: target / stop / timeout / skipped / open.
 
-    Bought at the OPEN of the first session after the recommendation (not the close it was computed on),
-    with the published target and stop. A gap through a level fills at that day's open, so a gap below the
-    stop loses more than the stop. If the stock already opens beyond the target or stop on entry day, the
-    trade is not taken ("skipped"). Stop wins when both levels are touched in one bar."""
-    stop, target = p["stop_loss"], p["target"]
+    Bought at the OPEN of the first session after the recommendation (not the close it was computed on).
+    The target and stop keep their published distances but are measured from that fill, exactly as in the
+    22-year backtest (features.next_open_outcomes) that the chance of profit comes from: a stock that gaps
+    up 2% gets a target and a stop 2% higher, not a smaller reward and a bigger risk. A later gap through a
+    level fills at that day's open, so a gap below the stop loses more than the stop. Stop wins when both
+    levels are touched in one bar."""
     after = bars[bars.index > pd.Timestamp(p["as_of"])].head(HOLD_MAX_DAYS)
     if after.empty:
         return "open", None, 0
     entry = float(after.open.iloc[0])
-    if not (stop < entry < target):
-        return "skipped", None, 0
+    stop, target = fill_levels(p["entry"], p["target"], p["stop_loss"], entry)
     for i, row in enumerate(after.itertuples(), 1):
         if i > 1 and row.open <= stop:
             return "stop", row.open / entry - 1, i

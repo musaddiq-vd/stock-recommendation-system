@@ -45,8 +45,19 @@ def test_evaluate_entry_at_next_open_with_gaps():
     bars = _bars([[102, 103, 100, 101, 1], [90, 91, 89, 90, 1]])
     out, ret, days = orchestrator.evaluate(PICK, bars, None)
     assert out == "stop" and round(ret, 4) == round(90 / 102 - 1, 4) and days == 2
-    # opened above the target on entry day: the trade is never taken
-    assert orchestrator.evaluate(PICK, _bars([[112, 113, 111, 112, 1]]), None)[0] == "skipped"
+    # opened far above the published target: still bought, with target and stop measured from the fill
+    assert orchestrator.evaluate(PICK, _bars([[112, 113, 111, 112, 1]]), None)[0] == "open"
+
+
+def test_levels_move_with_the_fill_like_the_backtest():
+    # published: ref 100, target 110 (+10), stop 95 (-5). Bought at 104 -> target 114, stop 99.
+    assert orchestrator.fill_levels(100.0, 110.0, 95.0, 104.0) == (99.0, 114.0)
+    up = _bars([[104, 111, 103, 110, 1], [110, 115, 109, 114, 1]])  # 111 is above the old target, below the new one
+    out, ret, days = orchestrator.evaluate(PICK, up, None)
+    assert out == "target" and days == 2 and round(ret, 4) == round(114 / 104 - 1, 4)
+    down = _bars([[104, 105, 98.5, 100, 1]])  # 98.5 never reached the old 95 stop, but breaks the new 99 one
+    out, ret, days = orchestrator.evaluate(PICK, down, None)
+    assert out == "stop" and round(ret, 4) == round(99 / 104 - 1, 4)
 
 
 def test_evaluate_uses_live_bar_for_today():

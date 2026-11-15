@@ -29,10 +29,12 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, 
     try {
       const q = Math.max(1, Math.floor(qty));
       // the server opens at the current price, so a trade taken days after the scan stays honest
-      const t = await post<{ entry: number; opened_on: string }>("/api/paper", {
+      // ref_price lets the server move target and stop with the fill (same distances), as the backtest does
+      const t = await post<{ entry: number; opened_on: string; target: number; stop_loss: number }>("/api/paper", {
         symbol: pick.symbol, qty: q, target: pick.levels.target, stop_loss: pick.levels.stop_loss, scan_id: scanId,
+        ref_price: pick.levels.entry,
       });
-      setPaperMsg(`Paper trade open: ${q} shares at ₹${t.entry} (${t.opened_on})`);
+      setPaperMsg(`Paper trade open: ${q} shares at ₹${t.entry} (${t.opened_on}) · target ₹${t.target} · stop ₹${t.stop_loss}`);
       setPaperOk(true);
       onPaper();
     } catch (e) {
@@ -76,6 +78,9 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, 
   const r = pick.research;
   const t = TIER_STYLE[pick.tier];
   const hold = pick.hold_days.split("-").pop();
+  // the levels are distances from the fill (ATR multiples), exactly how the backtest and the track record measure them
+  const dTarget = (pick.levels.target - pick.levels.entry).toFixed(2);
+  const dStop = (pick.levels.entry - pick.levels.stop_loss).toFixed(2);
   const failed = Object.entries(pick.gates || {}).filter(([, ok]) => !ok).map(([g]) => `"${GATE_LABEL[g] || g}"`);
   const f = (k: string, pct = false) => {
     const v = fund[k] as number | undefined;
@@ -146,12 +151,14 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, 
           )}
           <ol className="mt-2 space-y-1.5 text-xs text-zinc-300">
             <Step n={1}>
-              <b className="text-white">Buy at the next session&apos;s open</b> (the first trading day after {pick.as_of}), only if it opens between
-              ₹{pick.levels.stop_loss} and ₹{pick.levels.target}. If it gaps outside that range, skip the trade.
+              <b className="text-white">Buy at the next session&apos;s open</b> (the first trading day after {pick.as_of}). Note the price you
+              actually paid.
             </Step>
             <Step n={2}>
-              <b className="text-white">Place both exits at once:</b> sell at <span className="text-emerald-400">₹{pick.levels.target}</span> (target) or at{" "}
-              <span className="text-red-400">₹{pick.levels.stop_loss}</span> (stop-loss), whichever is touched first. Do not move the stop down.
+              <b className="text-white">Place both exits from your buy price:</b> target = buy price{" "}
+              <span className="text-emerald-400">+ ₹{dTarget}</span>, stop-loss = buy price <span className="text-red-400">− ₹{dStop}</span>, whichever is
+              touched first. At the reference price of ₹{pick.levels.entry} that is ₹{pick.levels.target} and ₹{pick.levels.stop_loss}; if the stock
+              opens higher or lower, both levels move with it. Do not move the stop down.
             </Step>
             <Step n={3}>
               <b className="text-white">Time limit:</b> if neither is hit, sell at the close of the {hold}th trading day. Past signals like this lasted

@@ -97,8 +97,24 @@ def test_paper_trade_opens_at_current_price(monkeypatch):
     monkeypatch.setattr(paper, "live_quotes", lambda syms: {"TCS": {"last": 104.0, "date": "2026-11-09"}})
     t = paper.open_trade("TCS", 10, target=110, stop_loss=95)
     assert t["entry"] == 104.0 and t["opened_on"] == "2026-11-09"
+    with pytest.raises(paper.TradeRejected):  # one open trade per stock
+        paper.open_trade("TCS", 10, target=110, stop_loss=95)
+    monkeypatch.setattr(paper, "load_many", lambda syms: {"INFY": bars})
+    monkeypatch.setattr(paper, "live_quotes", lambda syms: {"INFY": {"last": 104.0, "date": "2026-11-09"}})
     with pytest.raises(paper.TradeRejected):  # price already above the target
-        paper.open_trade("TCS", 10, target=103, stop_loss=95)
+        paper.open_trade("INFY", 10, target=103, stop_loss=95)
+    # with the reference close, target and stop move with the fill and keep their distances
+    t = paper.open_trade("INFY", 10, target=110, stop_loss=95, ref_price=100.0)
+    assert (t["entry"], t["target"], t["stop_loss"]) == (104.0, 114.0, 99.0)
+
+
+def test_paper_pnl_is_net_of_costs(monkeypatch):
+    db.init_extra()
+    monkeypatch.setattr(paper.alerts, "send_once", lambda *a, **k: None)
+    tid = db.add_paper({"symbol": "COSTCO", "side": "long", "qty": 10, "lots": None, "entry": 100.0,
+                        "target": 110.0, "stop_loss": 95.0, "opened_on": "2026-11-09", "scan_id": None})
+    trade = next(t for t in db.list_paper("open") if t["id"] == tid)
+    assert paper._exit(trade, "target", 110.0, "2026-11-12") == 97.0  # (110 - 100) x 10, minus 0.3% of 1,000
 
 
 def test_tier_rules():

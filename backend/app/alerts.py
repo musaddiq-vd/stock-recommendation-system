@@ -80,7 +80,8 @@ def pick_outcome(pick_row: dict, outcome: str, ret: float | None) -> None:
     pct = f" ({ret * 100:+.1f}%)" if ret is not None else ""
     send_once(f"pick:{pick_row['symbol']}:{pick_row['as_of']}:{outcome}",
               f"{emoji} <b>{pick_row['symbol']}</b> recommendation hit <b>{outcome.upper()}</b>{pct}\n"
-              f"Entry ₹{pick_row['entry']} · Target ₹{pick_row['target']} · Stop ₹{pick_row['stop_loss']}")
+              f"Signal levels (measured from the buy price at the next open): reference ₹{pick_row['entry']} · "
+              f"target ₹{pick_row['target']} · stop ₹{pick_row['stop_loss']}")
 
 
 def ops_alert(key: str, text: str) -> bool:

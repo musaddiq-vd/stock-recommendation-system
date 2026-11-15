@@ -55,7 +55,7 @@ researches each one with LLM agents, and tracks every call against real market d
 | 🎯 | **Chance of profit on every pick** | Each card shows what happened to past signals with the same ML rank and market state: how often they closed in profit, how often they reached the full target, the average win and loss and the average holding time. These are observed frequencies from the 22-year walk-forward, not a promise for one trade. |
 | 🧭 | **Market context** | Nifty regime (bullish / neutral / bearish), FII/DII net flows and a sector **money-flow heatmap**. |
 | 📐 | **Position sizing** | Risk-based sizing for Buy calls: lose at most your risk % of capital if the stop hits, never invest more than your capital. Shows shares, capital used, max loss and target profit. |
-| 📝 | **Paper trading** | Open virtual trades from any pick. They auto-close at target, stop or the 20-day timeout, with live P&L. |
+| 📝 | **Paper trading** | Open virtual trades from any pick: bought at the current price, with target and stop moved to keep their distance from that fill. They auto-close at target, stop or the 20-day timeout; P&L is after the 0.3% cost, one open trade per stock. |
 | 🔔 | **Telegram alerts** | New Buy calls, target/stop hits, paper-trade exits, a weekly summary, and warnings when a scan fails or data goes stale. |
 | 🔬 | **22-year research** | Walk-forward test from 2004 to 2026 on 30 years of data: 20 target/stop settings, regime and rubric filters, a random baseline and an anonymised LLM test. |
 | 📈 | **Live track record** | Real outcomes of the app's own past picks (target, stop or 20-day exit), per tier. |
@@ -243,8 +243,10 @@ flowchart TB
    similar past signals; the best stock the agent cleared is flagged as the day's top pick; Buy calls go to Telegram.
    Progress streams to the dashboard while the scan runs; a failure is recorded and sent as an ops alert.
 
-After a scan, the intraday job checks open picks and paper trades every 15 minutes, and outcomes (target, stop,
-20-day exit, or "skipped" when the next open gaps past a level) feed the live track record.
+After a scan, the intraday job checks open picks and paper trades every 15 minutes, and outcomes (target, stop or
+20-day exit) feed the live track record. A pick is counted as bought at the next open, with its target and stop
+measured from that fill (same distances as published), exactly as in the backtest, so the track record, the paper
+trades and the chance of profit all describe the same trade.
 
 ### Where data lives
 | Path in `STORAGE_DIR` | Contents | Rebuilt by |
@@ -351,7 +353,7 @@ reference.
 
 | Tab | What you see |
 |---|---|
-| **AI Picks** | Status tiles (market gate, Buy calls, the Buy rule's 22-year record, latest scan), the top pick of the day, then the scanned stocks as cards (filter All / Buy / Watch / Avoid, search by symbol, name or sector) with entry / target / stop, the chance of profit, the three checks and official event badges; Buy cards also show the 22-year stats and position size. The latest-scan tile is also the scan history: pick an earlier scan to see what it found (a warning marks it as old). Click a card for the chance of winning, the candlestick chart, a four-step trade plan (buy at the next open, place target and stop, time limit, size by the stop), rubric breakdown, gates, the agent's news findings, fundamentals, sources and the full research trail. |
+| **AI Picks** | Status tiles (market gate, Buy calls, the Buy rule's 22-year record, latest scan), the top pick of the day, then the scanned stocks as cards (filter All / Buy / Watch / Avoid, search by symbol, name or sector) with entry / target / stop, the chance of profit, the three checks and official event badges; Buy cards also show the 22-year stats and position size. The latest-scan tile is also the scan history: pick an earlier scan to see what it found (a warning marks it as old). Click a card for the chance of winning, the candlestick chart, a four-step trade plan (buy at the next open, set target and stop from your buy price, time limit, size by the stop), rubric breakdown, gates, the agent's news findings, fundamentals, sources and the full research trail. |
 | **Sector Heatmap** | Money flow (20D / 5D), 1D–3M returns, relative strength, breadth, turnover and delivery surge per sector. |
 | **Backtest** | Live track record of past picks, the 22-year walk-forward (equity, yearly returns, per-tier stats) and the latest model's 12-month test. |
 | **Paper Portfolio** | Virtual equity, realized / unrealized P&L, win rate and every open or closed trade. |
