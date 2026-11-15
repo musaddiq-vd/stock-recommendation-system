@@ -10,8 +10,8 @@ type Candle = { time: string; open: number; high: number; low: number; close: nu
 // rule-based rubric, shown for context only (it did not improve the survivorship-free backtest)
 const RUBRIC_MAX: Record<string, number> = { structure: 20, momentum: 15, volume: 15, risk_reward: 10 };
 
-export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }: {
-  pick: Pick; onClose: () => void; settings: Settings | null; scanId?: number; onPaper: () => void;
+export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, onPortfolio }: {
+  pick: Pick; onClose: () => void; settings: Settings | null; scanId?: number; onPaper: () => void; onPortfolio: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEscape(onClose);
@@ -19,19 +19,27 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
   const size = positionSize(pick, settings);
   const [qty, setQty] = useState(size?.qty || 1);
   const [paperMsg, setPaperMsg] = useState("");
+  const [paperOk, setPaperOk] = useState(false);
+  const [paperBusy, setPaperBusy] = useState(false);
 
   async function paperTrade() {
+    if (paperBusy) return; // the server fetches a live price first: a second click must not open a second trade
     setPaperMsg("");
+    setPaperBusy(true);
     try {
       const q = Math.max(1, Math.floor(qty));
       // the server opens at the current price, so a trade taken days after the scan stays honest
       const t = await post<{ entry: number; opened_on: string }>("/api/paper", {
         symbol: pick.symbol, qty: q, target: pick.levels.target, stop_loss: pick.levels.stop_loss, scan_id: scanId,
       });
-      setPaperMsg(`Paper trade open: ${q} shares at ₹${t.entry} (${t.opened_on}) ✓`);
+      setPaperMsg(`Paper trade open: ${q} shares at ₹${t.entry} (${t.opened_on})`);
+      setPaperOk(true);
       onPaper();
     } catch (e) {
-      setPaperMsg(`⚠️ ${e instanceof Error ? e.message : e}`);
+      setPaperOk(false);
+      setPaperMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPaperBusy(false);
     }
   }
 
@@ -67,6 +75,8 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
 
   const r = pick.research;
   const t = TIER_STYLE[pick.tier];
+  const hold = pick.hold_days.split("-").pop();
+  const failed = Object.entries(pick.gates || {}).filter(([, ok]) => !ok).map(([g]) => `"${GATE_LABEL[g] || g}"`);
   const f = (k: string, pct = false) => {
     const v = fund[k] as number | undefined;
     if (v == null) return "–";
@@ -120,9 +130,40 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
         <div ref={ref} className="mt-4 w-full h-[320px]" />
 
         <div className="grid grid-cols-3 gap-2 mt-2 text-sm">
-          <Stat k="Entry (last close)" v={`₹${pick.levels.entry}`} />
+          <Stat k="Reference (last close)" v={`₹${pick.levels.entry}`} />
           <Stat k={`Target (+${pick.levels.target_pct}%)`} v={`₹${pick.levels.target}`} cls="text-emerald-400" />
           <Stat k={`Stop (-${pick.levels.stop_pct}%)`} v={`₹${pick.levels.stop_loss}`} cls="text-red-400" />
+        </div>
+
+        <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+          <div className="text-sm font-semibold text-zinc-200">
+            {pick.tier === "strong" ? "How to take this trade" : "How this trade would be taken"}
+          </div>
+          {pick.tier !== "strong" && (
+            <p className="mt-1 text-xs text-amber-300">
+              Not a Buy call: {failed.length ? `it failed ${failed.join(" and ")}` : "the research agent held it back"}. The plan below is for study or a paper trade.
+            </p>
+          )}
+          <ol className="mt-2 space-y-1.5 text-xs text-zinc-300">
+            <Step n={1}>
+              <b className="text-white">Buy at the next session&apos;s open</b> (the first trading day after {pick.as_of}), only if it opens between
+              ₹{pick.levels.stop_loss} and ₹{pick.levels.target}. If it gaps outside that range, skip the trade.
+            </Step>
+            <Step n={2}>
+              <b className="text-white">Place both exits at once:</b> sell at <span className="text-emerald-400">₹{pick.levels.target}</span> (target) or at{" "}
+              <span className="text-red-400">₹{pick.levels.stop_loss}</span> (stop-loss), whichever is touched first. Do not move the stop down.
+            </Step>
+            <Step n={3}>
+              <b className="text-white">Time limit:</b> if neither is hit, sell at the close of the {hold}th trading day. Past signals like this lasted
+              about {pick.odds ? Math.round(pick.odds.avg_days) : 12} days on average.
+            </Step>
+            <Step n={4}>
+              <b className="text-white">Size by the stop:</b>{" "}
+              {size && size.qty > 0
+                ? <>{size.qty} shares keeps the loss at the stop near {inr(size.maxLoss)} ({settings!.risk_pct}% of your capital).</>
+                : "set your capital and risk % in Settings to get a share count."}
+            </Step>
+          </ol>
         </div>
 
         <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
@@ -146,10 +187,16 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
             <input type="number" min={1} step={1} value={qty}
               onChange={(e) => setQty(+e.target.value)}
               className="w-28 rounded-lg bg-zinc-950 border border-zinc-700 px-2 py-1 text-sm text-white" />
-            <button onClick={paperTrade} className="rounded-lg bg-sky-700 hover:bg-sky-600 px-4 py-1.5 text-sm font-semibold text-white">
-              Paper trade (buy)
+            <button onClick={paperTrade} disabled={paperBusy}
+              className="rounded-lg bg-sky-700 hover:bg-sky-600 px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-60">
+              {paperBusy ? "Opening…" : "Paper trade (buy)"}
             </button>
-            <span className="text-xs text-emerald-400">{paperMsg}</span>
+            <span className={`text-xs ${paperOk ? "text-emerald-400" : "text-amber-300"}`}>{paperMsg}</span>
+            {paperOk && (
+              <button onClick={onPortfolio} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-800">
+                View portfolio →
+              </button>
+            )}
           </div>
         </div>
 
@@ -249,6 +296,15 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper }
         </p>
       </div>
     </div>
+  );
+}
+
+function Step({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <li className="flex gap-2.5">
+      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[10px] font-semibold text-zinc-300">{n}</span>
+      <span className="leading-relaxed">{children}</span>
+    </li>
   );
 }
 

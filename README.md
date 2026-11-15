@@ -351,12 +351,12 @@ reference.
 
 | Tab | What you see |
 |---|---|
-| **AI Picks** | Status tiles (market gate, Buy calls, the Buy rule's 22-year record, latest scan), the top pick of the day, then the scanned stocks as cards (filter All / Buy / Watch / Avoid, search by symbol, name or sector) with entry / target / stop, the chance of profit, the three checks and official event badges; Buy cards also show the 22-year stats and position size. Click a card for the candlestick chart, rubric breakdown, gates, the agent's news findings, fundamentals, sources and the full research trail. |
+| **AI Picks** | Status tiles (market gate, Buy calls, the Buy rule's 22-year record, latest scan), the top pick of the day, then the scanned stocks as cards (filter All / Buy / Watch / Avoid, search by symbol, name or sector) with entry / target / stop, the chance of profit, the three checks and official event badges; Buy cards also show the 22-year stats and position size. The latest-scan tile is also the scan history: pick an earlier scan to see what it found (a warning marks it as old). Click a card for the chance of winning, the candlestick chart, a four-step trade plan (buy at the next open, place target and stop, time limit, size by the stop), rubric breakdown, gates, the agent's news findings, fundamentals, sources and the full research trail. |
 | **Sector Heatmap** | Money flow (20D / 5D), 1D–3M returns, relative strength, breadth, turnover and delivery surge per sector. |
 | **Backtest** | Live track record of past picks, the 22-year walk-forward (equity, yearly returns, per-tier stats) and the latest model's 12-month test. |
 | **Paper Portfolio** | Virtual equity, realized / unrealized P&L, win rate and every open or closed trade. |
 
-Pages are on a rail at the left (a bar at the bottom on phones) and live in the URL (`#picks`, `#sectors`, `#backtest`, `#paper`), so refresh, back / forward and shared links keep the page. The bar on top shows Nifty, the regime, the market gate and FII/DII flows on every page. The research chat sits on the right (a floating button on mobile). Settings hold capital, risk % and Telegram. Esc closes the stock drawer and the settings dialog.
+Pages are on a rail at the left (a bar at the bottom on phones) and live in the URL (`#picks`, `#sectors`, `#backtest`, `#paper`), so refresh, back / forward and shared links keep the page. The bar on top shows Nifty, the regime, the market gate and FII/DII flows on every page. The research chat sits on the right (a floating button on mobile). Settings hold capital, risk % and Telegram. Esc closes the stock drawer and the settings dialog. After a paper trade is opened, one click goes to the portfolio. If the API is not running or the model is not trained yet, the page says so and what to run.
 
 ---
 

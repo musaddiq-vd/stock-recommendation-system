@@ -95,7 +95,11 @@ def latest_scan(universe=None, done_only=True):
 
 def list_scans(limit=20):
     with conn() as c:
-        rows = c.execute("SELECT * FROM scans ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        # with the number of picks and Buy calls, so the history list can say what each scan found
+        rows = c.execute(
+            "SELECT s.*, COUNT(p.id) AS picks, COALESCE(SUM(p.tier = 'strong'), 0) AS buys "
+            "FROM scans s LEFT JOIN picks p ON p.scan_id = s.id GROUP BY s.id ORDER BY s.id DESC LIMIT ?",
+            (limit,)).fetchall()
     return [{k: v for k, v in _scan_row(r).items() if k != "progress"} for r in rows]
 
 

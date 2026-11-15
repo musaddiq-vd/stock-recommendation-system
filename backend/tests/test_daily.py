@@ -85,6 +85,21 @@ def test_live_record_counts_wins_after_costs():
     assert t["avg_ret"] == round((0.10 + 0.002) / 2 - 0.003, 4)
 
 
+def test_scan_history_says_what_each_scan_found():
+    from app import db
+
+    db.init()
+    base = {"levels": {"entry": 100, "target": 110, "stop_loss": 95}, "as_of": "2026-03-02", "score": 99, "scoring_version": "h"}
+    sid = db.create_scan("NIFTY100", "IT", "news")
+    db.save_picks(sid, [{**base, "symbol": "H1", "tier": "strong"}, {**base, "symbol": "H2", "tier": "strong"},
+                        {**base, "symbol": "H3", "tier": "watch"}])
+    empty = db.create_scan("NIFTY50", None, "news")
+    rows = {r["id"]: r for r in db.list_scans()}
+    assert (rows[sid]["picks"], rows[sid]["buys"], rows[sid]["sector"]) == (3, 2, "IT")
+    assert (rows[empty]["picks"], rows[empty]["buys"]) == (0, 0)
+    assert "progress" not in rows[sid]
+
+
 def test_buy_alert_is_honest_about_the_odds():
     from app import alerts
 

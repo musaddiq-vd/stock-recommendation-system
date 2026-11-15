@@ -9,7 +9,7 @@ import SettingsPanel from "@/components/SettingsPanel";
 import StockDrawer from "@/components/StockDrawer";
 import Login from "@/components/Login";
 import { Icon, MobileNav, NavRail, Tab, TAB_META, TABS } from "@/components/Nav";
-import { AUTH_EVENT, get, getToken, Market, Pick, post, Scan, setToken, Tier, TierStats, tierStatsFrom } from "@/lib/api";
+import { API, AUTH_EVENT, get, getToken, Health, Market, Pick, post, Scan, ScanInfo, setToken, Tier, TierStats, tierStatsFrom } from "@/lib/api";
 import { Settings } from "@/lib/sizing";
 
 const UNIVERSES = ["NIFTY50", "NIFTY100", "NIFTY500"];
@@ -56,6 +56,9 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
   const [tierFilter, setTierFilter] = useState<Tier | "all">("all");
   const [query, setQuery] = useState("");
   const [scanOpen, setScanOpen] = useState(false);
+  const [scans, setScans] = useState<ScanInfo[]>([]);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [apiDown, setApiDown] = useState(false);
   const [heatIndex, setHeatIndex] = useState("NIFTY500"); // its own choice: browsing sectors must not change the next scan
   const [tierStats, setTierStats] = useState<TierStats>({});
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -79,12 +82,19 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
     document.title = `${TAB_META[tab].title} · AI Swing Trader`;
   }, [tab]);
 
+  const loadScans = useCallback(() => {
+    get<ScanInfo[]>("/api/scans").then(setScans).catch(() => {});
+  }, []);
+
   useEffect(() => {
-    get<{ sectors: string[] }>("/api/universe").then((d) => setSectors(d.sectors)).catch((e) => setErr(String(e)));
+    // one clear message when the backend is not running, instead of a raw network error per request
+    get<Health>("/api/health").then(setHealth).catch(() => setApiDown(true));
+    loadScans();
+    get<{ sectors: string[] }>("/api/universe").then((d) => setSectors(d.sectors)).catch(() => {});
     get<Market>("/api/market").then(setMarket).catch(() => {});
     get<{ variants: [] }>("/api/research").then((r) => setTierStats(tierStatsFrom(r))).catch(() => {});
     get<Settings>("/api/settings").then(setSettings).catch(() => {});
-  }, []);
+  }, [loadScans]);
 
   // Polls a running scan; network blips are retried with backoff instead of leaving the button stuck.
   const poll = useCallback(async (id: number, failures = 0) => {
@@ -92,13 +102,28 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
       const s = await get<Scan>(`/api/scans/${id}`);
       setScan(s);
       if (s.status === "running") setTimeout(() => poll(id), 2500);
-      else setScanId(null);
+      else {
+        setScanId(null);
+        loadScans();
+      }
     } catch (e) {
       if (failures >= 8) {
         setErr(`Lost track of scan #${id}: ${e instanceof Error ? e.message : e}`);
         setScanId(null);
       } else setTimeout(() => poll(id, failures + 1), Math.min(30000, 2500 * 2 ** failures));
     }
+  }, [loadScans]);
+
+  /** Open an earlier scan from the history. */
+  const openScan = useCallback((id: number) => {
+    setErr("");
+    get<Scan>(`/api/scans/${id}`)
+      .then((s) => {
+        setScan(s);
+        setTierFilter("all");
+        setQuery("");
+      })
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   }, []);
 
   useEffect(() => {
@@ -141,6 +166,8 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
   const topPick = scan?.status === "done" ? longs.find((p) => p.top_pick) : undefined;
   const sm = scan?.market;
   const gateOpen = sm?.breadth200 != null ? sm.above_ema200 && sm.breadth200 > 0.5 : null;
+  const latestDone = scans.find((s) => s.status === "done");
+  const older = !!scan && scan.status === "done" && !!latestDone && scan.id < latestDone.id;
   const closeDrawer = useCallback(() => setOpen(null), []);
   const closeSettings = useCallback(() => setShowSettings(false), []);
   const signOut = authRequired
@@ -205,9 +232,21 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
 
         <main className="@container flex-1 overflow-y-auto pb-20 lg:pb-0">
           <div className="mx-auto w-full max-w-[1500px] space-y-5 px-4 py-5 lg:px-6">
-            {err && <div className="rounded-lg border border-red-900 bg-red-950/30 px-4 py-2 text-sm text-red-200">{err}</div>}
+            {apiDown && (
+              <Notice tone="bad" action="Retry" onAction={() => window.location.reload()}>
+                <b>Cannot reach the API</b> at {API}. Start the backend (<code className="text-red-100">uvicorn app.main:app</code> in{" "}
+                <code className="text-red-100">backend/</code>, or <code className="text-red-100">docker compose up</code>) and retry.
+              </Notice>
+            )}
+            {health && !health.model_ready && (
+              <Notice tone="warn">
+                <b>The model is not trained yet</b>, so scans cannot run. In <code className="text-amber-100">backend/</code> run{" "}
+                <code className="text-amber-100">python -m app.model.train</code> once (see the README quick start), then reload this page.
+              </Notice>
+            )}
+            {err && !apiDown && <Notice tone="bad" action="Dismiss" onAction={() => setErr("")}>{err}</Notice>}
 
-            {tab === "paper" && <PaperPanel refreshKey={paperKey} />}
+            {tab === "paper" && <PaperPanel refreshKey={paperKey} onPicks={() => goTab("picks")} />}
             {tab === "backtest" && <BacktestPanel />}
             {tab === "sectors" && (
               <>
@@ -222,9 +261,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
             {tab === "picks" && (
               <>
                 {market?.regime === "bearish" && (
-                  <div className="rounded-lg border border-red-900 bg-red-950/30 px-4 py-2 text-sm text-red-200">
-                    Nifty is below its 200-day average (bearish regime). Be extra careful with position sizes.
-                  </div>
+                  <Notice tone="bad">Nifty is below its 200-day average (bearish regime). Be extra careful with position sizes.</Notice>
                 )}
 
                 <section aria-label="New scan" className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
@@ -270,9 +307,31 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
                     <Tile label="Buy rule, 22-year test"
                       value={tierStats.strong ? `${(tierStats.strong.win_rate * 100).toFixed(0)}% profitable` : "–"}
                       sub={tierStats.strong ? `profit factor ${tierStats.strong.profit_factor} · worst drawdown ${(tierStats.strong.max_dd * 100).toFixed(0)}%` : "Run the research report"} />
-                    <Tile label="Latest scan" value={`#${scan.id} · ${scan.universe.replace("NIFTY", "Nifty ")}`}
-                      sub={`${scan.created_at.replace("T", " ").slice(0, 16)}${scan.sector ? ` · ${scan.sector}` : ""}`} />
+                    <div className={`rounded-xl border px-4 py-3 ${older ? "border-amber-800/80 bg-amber-950/20" : "border-zinc-800 bg-zinc-900/40"}`}>
+                      <label htmlFor="scan-history" className="text-[10px] uppercase tracking-wide text-zinc-500">
+                        {older ? "Viewing an older scan" : "Latest scan"}
+                      </label>
+                      <select id="scan-history" value={scan.id} onChange={(e) => openScan(+e.target.value)}
+                        className="mt-0.5 block w-full truncate rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-sm font-semibold text-white">
+                        {!scans.some((s) => s.id === scan.id) && <option value={scan.id}>#{scan.id} · {scan.universe.replace("NIFTY", "Nifty ")}</option>}
+                        {scans.filter((s) => s.status !== "running").map((s) => (
+                          <option key={s.id} value={s.id}>
+                            #{s.id} · {s.created_at.slice(5, 16).replace("T", " ")} · {s.universe.replace("NIFTY", "Nifty ")}
+                            {s.sector ? ` · ${s.sector}` : ""} · {s.status === "error" ? "failed" : `${s.buys} Buy`}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="mt-1 text-[11px] leading-snug text-zinc-500">
+                        {scans.length > 1 ? `${scans.length} scans in history` : "Pick an earlier scan here once there are more"}
+                      </div>
+                    </div>
                   </div>
+                )}
+                {older && (
+                  <Notice tone="warn" action="Back to latest" onAction={() => latestDone && openScan(latestDone.id)}>
+                    You are looking at scan #{scan?.id} from {scan?.created_at.slice(0, 10)}. Its prices, levels and Buy calls are from that day
+                    and may no longer be valid: check each card&apos;s result so far.
+                  </Notice>
                 )}
 
                 {running && scan && (
@@ -285,9 +344,7 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
                     </div>
                   </div>
                 )}
-                {scan?.status === "error" && (
-                  <div className="rounded-lg border border-red-900 bg-red-950/30 px-4 py-2 text-sm text-red-200">Scan failed: {scan.error}</div>
-                )}
+                {scan?.status === "error" && <Notice tone="bad">Scan failed: {scan.error}</Notice>}
 
                 {topPick && <TopPick p={topPick} onOpen={() => setOpen(topPick)} />}
 
@@ -346,7 +403,8 @@ function Dashboard({ authRequired }: { authRequired: boolean }) {
 
       {open && (
         <StockDrawer pick={open} onClose={closeDrawer} settings={settings} scanId={scan?.id}
-          onPaper={() => setPaperKey((k) => k + 1)} />
+          onPaper={() => setPaperKey((k) => k + 1)}
+          onPortfolio={() => { setOpen(null); goTab("paper"); }} />
       )}
       {showSettings && settings && <SettingsPanel s={settings} onSaved={setSettings} onClose={closeSettings} />}
     </div>
@@ -411,6 +469,20 @@ const TONE: Record<Tone, string> = {
 
 function Chip({ children, tone, title }: { children: React.ReactNode; tone?: Tone; title?: string }) {
   return <span title={title} className={`rounded-full border px-2.5 py-1 ${tone ? TONE[tone] : "border-zinc-800 text-zinc-300"}`}>{children}</span>;
+}
+
+function Notice({ tone, children, action, onAction }: {
+  tone: "warn" | "bad"; children: React.ReactNode; action?: string; onAction?: () => void;
+}) {
+  const cls = tone === "bad" ? "border-red-900 bg-red-950/30 text-red-200" : "border-amber-800/80 bg-amber-950/20 text-amber-200";
+  return (
+    <div role={tone === "bad" ? "alert" : "status"} className={`flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border px-4 py-2 text-sm ${cls}`}>
+      <div className="min-w-0 flex-1 basis-64">{children}</div>
+      {action && (
+        <button onClick={onAction} className="rounded-md border border-current/40 px-3 py-1 text-xs font-medium hover:bg-white/5">{action}</button>
+      )}
+    </div>
+  );
 }
 
 function Tile({ label, value, sub, tone }: { label: string; value: string; sub: string; tone?: Tone }) {

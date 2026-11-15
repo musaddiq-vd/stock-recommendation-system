@@ -69,6 +69,13 @@ export interface Scan {
   picks: Pick[];
 }
 
+/** One row of the scan history (no picks, just what the scan found). */
+export interface ScanInfo {
+  id: number; created_at: string; universe: string; sector: string | null; status: Scan["status"]; picks: number; buys: number;
+}
+
+export interface Health { ok: boolean; model_ready: boolean; scan_running: boolean; scheduler: boolean; prices_as_of?: string | null }
+
 // ---------- session ----------
 const TOKEN_KEY = "swing.token";
 export const AUTH_EVENT = "swing:auth-required";

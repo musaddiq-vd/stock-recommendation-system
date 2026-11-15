@@ -17,7 +17,7 @@ const STATUS: Record<string, string> = {
   open: "text-sky-300", target: "text-emerald-400", stop: "text-red-400", timeout: "text-zinc-300", closed: "text-zinc-300",
 };
 
-export default function PaperPanel({ refreshKey }: { refreshKey: number }) {
+export default function PaperPanel({ refreshKey, onPicks }: { refreshKey: number; onPicks: () => void }) {
   const [pf, setPf] = useState<Portfolio | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -43,7 +43,7 @@ export default function PaperPanel({ refreshKey }: { refreshKey: number }) {
   const pnl = pf.realized + pf.unrealized;
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 gap-2 @2xl:grid-cols-3 @5xl:grid-cols-5">
         <Box k="Virtual equity" v={inr(pf.equity)} />
         <Box k="Total P&L" v={`${inr(pnl)} (${pf.return_pct > 0 ? "+" : ""}${pf.return_pct}%)`} cls={pnl >= 0 ? "text-emerald-400" : "text-red-400"} />
         <Box k="Realized" v={inr(pf.realized)} cls={pf.realized >= 0 ? "text-emerald-400" : "text-red-400"} />
@@ -58,7 +58,10 @@ export default function PaperPanel({ refreshKey }: { refreshKey: number }) {
       </div>
       {pf.trades.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
-          No paper trades yet. Open any pick and press <b className="text-zinc-300">Paper trade</b>.
+          <p>No paper trades yet. Open any pick and press <b className="text-zinc-300">Paper trade</b> to practise it with virtual money.</p>
+          <button onClick={onPicks} className="mt-3 rounded-lg bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-500">
+            Go to AI Picks
+          </button>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-zinc-800">
