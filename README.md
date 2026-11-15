@@ -53,6 +53,11 @@ researches each one with LLM agents, and tracks every call against real market d
 | 🤖 | **Research agent** | For the top candidates, an LLM agent (AWS Bedrock) reads news, filings, fundamentals and official NSE event dates, and can veto a pick for red flags, negative news or results inside the holding window. |
 | 🟢 | **One honest Buy tier** | A stock is a green **Buy** only when all three checks pass: top 2% of the daily ML ranking, market gate open, research agent clear. Everything else is **Watch** or **Avoid**, never a buy. |
 | 🎯 | **Chance of profit on every pick** | Each card shows what happened to past signals with the same ML rank and market state: how often they closed in profit, how often they reached the full target, the average win and loss and the average holding time. These are observed frequencies from the 22-year walk-forward, not a promise for one trade. |
+| 🔍 | **Why this pick** | Each pick shows the indicators that raised or lowered its ML score, with the stock's own values (the model's SHAP values, so the explanation is exact, not a guess). |
+| 🚦 | **Risk badge** | Low, Medium or High from how far the stop is (under 5%, 5–9%, 9% or more), raised to High for an event inside the holding window or negative news. |
+| ✅ | **Price cross-check** | Each candidate's Yahoo close is compared with NSE's official bhavcopy close for the same day; a gap of more than 1% blocks the Buy call, because the levels could be wrong. |
+| 🧺 | **Sector limit** | A 3rd Buy call in the same sector is flagged: take it only if you hold fewer than 2 open trades there (in the 22-year test this cut the worst drawdown since 2016 from −22% to −18%). |
+| ⏳ | **Expiry** | A pick is meant for the next session's open. Once that session has started it is marked Expired, greyed out and given no position size; the chat says so too. |
 | 🧭 | **Market context** | Nifty regime (bullish / neutral / bearish), FII/DII net flows and a sector **money-flow heatmap**. |
 | 📐 | **Position sizing** | Risk-based sizing for Buy calls: lose at most your risk % of capital if the stop hits, never invest more than your capital. Shows shares, capital used, max loss and target profit. |
 | 📝 | **Paper trading** | Open virtual trades from any pick: bought at the current price, with target and stop moved to keep their distance from that fill. They auto-close at target, stop or the 20-day timeout; P&L is after the 0.3% cost, one open trade per stock. |
@@ -183,6 +188,23 @@ touched in one bar, the stop is assumed to hit first. Trades last ~13 sessions o
 - **Is the probability honest?** Not as a raw number: the top tenth of ML scores predicted a 42% target-hit rate and
   32% happened (2016+: 38% predicted, 34% happened). That is why the app ranks with the ML score but shows each pick's chance of
   profit from what actually happened to similar past signals. The Backtest tab shows the full table.
+- **Fourth round** (`python -m app.research.pattern_lab`, Nov 2026, with the trend filter in the gate; the live rule
+  scored profit factor 1.63 before 2016 and 1.41 after in this setup):
+
+  | Idea | Before 2016 PF | 2016+ PF | Worst drawdown (2016+) | Kept? |
+  |---|---:|---:|---:|---|
+  | At most 2 open trades per sector | 1.68 | 1.41 | −18% (live −22%) | Yes, as a flag on the 3rd Buy in a sector |
+  | At most 3 per sector | 1.61 | 1.43 | −18% | No (2 is better before 2016) |
+  | Candlestick pattern features in the model | 1.89 vs 1.91 | 1.36 vs 1.34 | −29% vs −21% | No |
+  | Support / resistance features in the model | 1.91 vs 1.91 | 1.38 vs 1.34 | −28% vs −21% | No |
+  | Entry within 1.5 ATR of support | 1.57 | 1.41 | −30% | No |
+  | Room to resistance ≥ 3.5 ATR / ≥ 2 ATR | 1.51–1.60 | 1.34–1.42 | −18% to −19% | No: 20–40% fewer trades, lower return |
+  | Bullish candle on the signal day / no bearish candle | 1.58–1.59 | 1.35–1.38 | −21% to −25% | No |
+  | XGBoost / CatBoost instead of LightGBM | 1.53–1.58 vs 1.86 | 1.21–1.28 vs 1.31 | −25% to −28% | No |
+  | Ensemble (average rank of all three) | 1.77 | 1.27 | −29% | No |
+
+  "vs" compares with LightGBM on the live features trained in the same run. Candles, levels and the other model types
+  were checked on the same walk-forward and the same gate, so the comparison is like for like.
 - **Added after testing** (`python -m app.research.feature_lab`): the 11 newer features above raised the live rule's
   profit factor from 1.50 to 1.66 on 2005–2015 data, where they were chosen, and from 1.30 to 1.34 on 2016–2026,
   with the worst drawdown down from −23% to −20%. Picks scored with them carry scoring version 9.
@@ -353,6 +375,7 @@ python -m app.research.feature_lab2 extra # second round of chart features (then
 python -m app.research.trade_lab          # exit rules and graded market gates
 python -m app.research.v2 calib pit       # predicted vs actual table in the Backtest tab
 python -m app.research.edge_lab extra     # weekly / monthly features (then: edge_lab run, rules, luck)
+python -m app.research.pattern_lab extra  # candles + support / resistance (then: pattern_lab run, rules; models needs xgboost and catboost)
 ```
 The same pipeline runs on today's Nifty 500 with `yahoo` instead of `pit` (after `python -m app.research.history`).
 
@@ -385,7 +408,7 @@ reference.
 
 | Tab | What you see |
 |---|---|
-| **AI Picks** | Status tiles (market gate, Buy calls, the Buy rule's 22-year record, latest scan), the top pick of the day, then the scanned stocks as cards (filter All / Buy / Watch / Avoid, search by symbol, name or sector) with entry / target / stop, the chance of profit, the three checks and official event badges; Buy cards also show the 22-year stats and position size. The latest-scan tile is also the scan history: pick an earlier scan to see what it found (a warning marks it as old). Click a card for the chance of winning, the candlestick chart, a four-step trade plan (buy at the next open, set target and stop from your buy price, time limit, size by the stop), rubric breakdown, gates, the agent's news findings, fundamentals, sources and the full research trail. |
+| **AI Picks** | Status tiles (market gate, Buy calls, the Buy rule's 22-year record, latest scan), the top pick of the day, then the scanned stocks as cards (filter All / Buy / Watch / Avoid, search by symbol, name or sector) with entry / target / stop, the chance of profit, the three checks and official event badges; Buy cards also show the 22-year stats and position size. The latest-scan tile is also the scan history: pick an earlier scan to see what it found (a warning marks it as old). Cards carry a risk badge and are marked Expired once their entry session has opened. Click a card for the chance of winning, why the model ranks it, the risk reasons, the Yahoo / NSE price check, the candlestick chart, a four-step trade plan (buy at the next open, set target and stop from your buy price, time limit, size by the stop), rubric breakdown, gates, the agent's news findings, fundamentals, sources and the full research trail. |
 | **Sector Heatmap** | Money flow (20D / 5D), 1D–3M returns, relative strength, breadth, turnover and delivery surge per sector. |
 | **Backtest** | Live track record of past picks, the 22-year walk-forward (equity, yearly returns, per-tier stats) and the latest model's 12-month test. |
 | **Paper Portfolio** | Virtual equity, realized / unrealized P&L, win rate and every open or closed trade. |

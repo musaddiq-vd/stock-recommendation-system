@@ -1,5 +1,5 @@
 "use client";
-import { Pick, TIER_STYLE, TierStat } from "@/lib/api";
+import { isExpired, Pick, RISK_STYLE, TIER_STYLE, TierStat } from "@/lib/api";
 import { inr, positionSize, Settings } from "@/lib/sizing";
 
 export const GATE_HINT: Record<string, string> = {
@@ -8,11 +8,12 @@ export const GATE_HINT: Record<string, string> = {
   regime: "Nifty above its 200-day average (older scans)",
   rubric: "Rule-based rubric score ≥ 70 (older scans)",
   agent: "Research agent found no red flags, no negative news and no results inside the holding window",
+  data: "Yahoo's closing price differs from NSE's official close by more than 1%, so the levels may be wrong",
 };
 
 /** Plain names for the checks, so cards never show internal keys like "ml_top". */
 export const GATE_LABEL: Record<string, string> = {
-  ml_top: "ML top 2%", market: "Market gate", agent: "Agent clear", regime: "Nifty trend", rubric: "Rubric",
+  ml_top: "ML top 2%", market: "Market gate", agent: "Agent clear", data: "Price check", regime: "Nifty trend", rubric: "Rubric",
 };
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -28,17 +29,35 @@ export default function PickCard({ p, onOpen, settings, stat }: {
 }) {
   const s = TIER_STYLE[p.tier];
   const l = p.levels;
-  const size = p.tier === "strong" ? positionSize(p, settings) : null; // only Buy calls get a size
+  const expired = isExpired(p);
+  const size = p.tier === "strong" && !expired ? positionSize(p, settings) : null; // only live Buy calls get a size
   return (
     <button
       onClick={onOpen}
-      className={`text-left rounded-xl border p-4 transition hover:-translate-y-0.5 hover:brightness-110 ${s.card}`}
+      className={`text-left rounded-xl border p-4 transition hover:-translate-y-0.5 hover:brightness-110 ${s.card} ${expired ? "opacity-60" : ""}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="font-semibold text-lg text-white">{p.symbol}</span>
             <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${s.badge}`}>{s.label}</span>
+            {p.risk && (
+              <span title={p.risk.reasons.join("; ")} className={`text-[10px] px-1.5 py-0.5 rounded border ${RISK_STYLE[p.risk.level].cls}`}>
+                {RISK_STYLE[p.risk.level].label}
+              </span>
+            )}
+            {expired && (
+              <span title={`Meant for the open of ${p.valid_until}; that session has started`}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-zinc-600 text-zinc-400">Expired</span>
+            )}
+            {p.sector_cap && (
+              <span title={`Already 2 better-ranked Buy calls in ${p.sector}. Take this one only if you hold fewer than 2 open trades in this sector (spreading across sectors cut the worst drawdown in the 22-year test).`}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-amber-700 text-amber-300">Sector limit</span>
+            )}
+            {p.price_check?.status === "mismatch" && (
+              <span title={`Yahoo ₹${p.price_check.yahoo_close} vs NSE ₹${p.price_check.nse_close}`}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-red-800 text-red-300">Price mismatch</span>
+            )}
             {p.official_event && (
               <span title={p.official_event.desc} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-600/50 whitespace-nowrap">
                 📅 {p.official_event.purpose.split("/")[0].replace("Financial ", "")} {p.official_event.date.slice(5)}

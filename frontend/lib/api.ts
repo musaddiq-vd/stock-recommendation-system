@@ -37,7 +37,12 @@ export interface Pick {
     label: string; gate_open: boolean; signals: number; win: number; target: number; avg_ret: number;
     avg_win: number; avg_loss: number; avg_days: number; recent_win: number | null; from: string; to: string;
   } | null;
-  top_pick?: boolean; // the day's single best stock the research agent cleared (a Buy only if tier is "strong")
+  top_pick?: boolean;
+  sector_cap?: boolean; // a 3rd+ Buy in the same sector: take it only if you hold fewer than 2 there
+  valid_until?: string; // the session this pick is meant to be bought at (its open)
+  why?: { feature: string; label: string; value: string; effect: number }[]; // model's own reasons (SHAP, log-odds)
+  risk?: { level: "low" | "medium" | "high"; reasons: string[] };
+  price_check?: { status: "ok" | "mismatch" | "unavailable"; nse_close?: number; yahoo_close?: number; diff_pct?: number }; // the day's single best stock the research agent cleared (a Buy only if tier is "strong")
   hold_days: string;
   levels: { entry: number; target: number; stop_loss: number; target_pct: number; stop_pct: number };
   technicals: Record<string, number | string>;
@@ -72,6 +77,18 @@ export interface Scan {
   error: string | null;
   picks: Pick[];
 }
+
+/** A pick is bought at the open (09:15 IST) of `valid_until`; once that session has started, the entry is gone. */
+export function isExpired(p: Pick, now: Date = new Date()): boolean {
+  if (!p.valid_until) return false;
+  return now.getTime() >= new Date(`${p.valid_until}T09:15:00+05:30`).getTime();
+}
+
+export const RISK_STYLE: Record<string, { cls: string; label: string }> = {
+  low: { cls: "border-emerald-700 text-emerald-300", label: "Low risk" },
+  medium: { cls: "border-amber-700 text-amber-300", label: "Medium risk" },
+  high: { cls: "border-red-800 text-red-300", label: "High risk" },
+};
 
 /** One row of the scan history (no picks, just what the scan found). */
 export interface ScanInfo {

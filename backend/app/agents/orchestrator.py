@@ -13,7 +13,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from .. import alerts, db
+from .. import alerts, db, explain
 from ..config import (AGENT_TOP_N, BREADTH_MIN, HOLD_MAX_DAYS, HOLD_MIN_DAYS, MIN_AVG_TRADED_VALUE,
                       ML_TOP_PCT,
                       SCORING_VERSION, SIDEWAYS_ADX,
@@ -127,7 +127,7 @@ def tier(verdict: str, gates: dict) -> str:
     return "strong" if verdict == "buy" and all(gates.values()) else "watch"
 
 
-def judge(row, market: dict, res: dict, ml_pct: int) -> dict:
+def judge(row, market: dict, res: dict, ml_pct: int, data_ok: bool = True) -> dict:
     """Gates + the agent's veto -> the published pick fields. The score is the ML percentile: the rule-based
     rubric, an ensemble and probability calibration did not improve the survivorship-free backtest, so they
     do not move the decision (the rubric is still shown for context)."""
@@ -139,6 +139,7 @@ def judge(row, market: dict, res: dict, ml_pct: int) -> dict:
                 and not res.get("event_in_window"))
     gates = {"ml_top": ml_pct >= ML_TOP_PCT,
              "market": gate_open(market),
+             **({} if data_ok else {"data": False}),  # Yahoo and NSE closes disagree: the levels may be wrong
              "agent": bool(agent_ok)}
     verdict = "avoid" if res.get("red_flags") else "buy" if agent_ok else "watch"
     return {"score": float(ml_pct), "verdict": verdict, "gates": gates, "tier": tier(verdict, gates),
@@ -158,7 +159,23 @@ def mark_top_pick(picks: list[dict]) -> dict | None:
     best = next((p for p in picks if p["tier"] != "avoid" and p.get("gates", {}).get("agent")), None)
     if best:
         best["top_pick"] = True
+    mark_sector_cap(picks)
     return best
+
+
+SECTOR_CAP = 2  # 22-year test: at most 2 open trades per sector lowered the worst drawdown (2016+: -22% -> -18%)
+
+
+def mark_sector_cap(picks: list[dict], cap: int = SECTOR_CAP) -> None:
+    """Flag Buy calls beyond the first `cap` of the same sector (picks are already sorted best first).
+    They stay Buy calls; the flag tells the user to take them only if they hold fewer than `cap` in that sector."""
+    seen: dict[str, int] = {}
+    for p in picks:
+        p["sector_cap"] = False
+        if p["tier"] != "strong" or not p.get("sector"):
+            continue
+        seen[p["sector"]] = seen.get(p["sector"], 0) + 1
+        p["sector_cap"] = seen[p["sector"]] > cap
 
 
 def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None, top_n: int = AGENT_TOP_N):
@@ -194,6 +211,19 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
         cands = [r for _, r in pool.head(top_n).iterrows()]
         log_step(f"ML screener ranked {len(scored)} stocks; top {len(cands)} from {universe} sent to research "
                  f"(market regime: {market['regime']})")
+        # why the model ranks each candidate (its own SHAP values) and a check of Yahoo's close against NSE's
+        m = load_model()
+        reasons = dict(zip([r.symbol for r in cands], explain.why(m["model"], m["features"], pool.head(top_n)),
+                           strict=False))
+        try:
+            bhav = nse.bhav_ohlc(pd.Timestamp(scored.date.iloc[0]).date())
+        except Exception:
+            bhav = None
+        checks = {r.symbol: explain.cross_check(r.symbol, str(pd.Timestamp(r.as_of).date()), float(r.close), bhav)
+                  for r in cands}
+        bad = [s for s, c in checks.items() if c["status"] == "mismatch"]
+        if bad:
+            log_step(f"Yahoo and NSE closes differ by more than 1% for {', '.join(bad)}: no Buy call for them")
 
         def work(r):
             snap = get_technicals(r.symbol)
@@ -216,12 +246,15 @@ def run_scan(scan_id: int, universe: str = "NIFTY100", sector: str | None = None
                     log_step(f"{r.symbol}: no price data, skipped")
                     continue
                 ml_pct = int(r.xs_pct)
-                j = judge(r, market, res, ml_pct)
+                j = judge(r, market, res, ml_pct, data_ok=checks[r.symbol]["status"] != "mismatch")
                 hs = hist_stats(float(r.prob))
+                as_of = str(pd.Timestamp(r.as_of).date())
                 picks.append({
                     "symbol": r.symbol, "name": r["name"], "sector": r.sector, "indices": r.indices,
                     "scoring_version": SCORING_VERSION,
-                    "as_of": str(pd.Timestamp(r.as_of).date()), "ml_prob": round(float(r.prob), 4),
+                    "as_of": as_of, "valid_until": explain.next_session(as_of), "ml_prob": round(float(r.prob), 4),
+                    "why": reasons.get(r.symbol, []), "price_check": checks[r.symbol],
+                    "risk": explain.risk(snap["trade_levels"], j["official_event"], res),
                     "ml_percentile": ml_pct, "hist_win_rate": hs["win_rate"], "hist_avg_ret": hs["avg_ret"],
                     "score": j["score"], "tier": j["tier"], "gates": j["gates"], "official_event": j["official_event"],
                     "odds": signal_odds(ml_pct, j["gates"]["market"]),

@@ -9,7 +9,9 @@ import SettingsPanel from "@/components/SettingsPanel";
 import StockDrawer from "@/components/StockDrawer";
 import Login from "@/components/Login";
 import { Icon, MobileNav, NavRail, Tab, TAB_META, TABS } from "@/components/Nav";
-import { API, AUTH_EVENT, get, getToken, Health, Market, Pick, post, Scan, ScanInfo, setToken, Tier, TierStats, tierStatsFrom } from "@/lib/api";
+import {
+  API, AUTH_EVENT, get, getToken, Health, isExpired, Market, Pick, post, RISK_STYLE, Scan, ScanInfo, setToken, Tier, TierStats, tierStatsFrom,
+} from "@/lib/api";
 import { Settings } from "@/lib/sizing";
 
 const UNIVERSES = ["NIFTY50", "NIFTY100", "NIFTY500"];
@@ -436,6 +438,8 @@ function TopPick({ p, onOpen }: { p: Pick; onOpen: () => void }) {
               {buy ? "Buy" : "Watch"}
             </span>
             <span className="text-xs text-zinc-400">ML top {Math.max(1, 100 - p.ml_percentile)}% today</span>
+            {p.risk && <span className={`rounded-full border px-2 py-0.5 text-[11px] ${RISK_STYLE[p.risk.level].cls}`}>{RISK_STYLE[p.risk.level].label}</span>}
+            {isExpired(p) && <span className="rounded-full border border-zinc-600 px-2 py-0.5 text-[11px] text-zinc-400">Expired</span>}
           </div>
           <div className="mt-0.5 truncate text-sm text-zinc-400">{p.name} · {p.sector}</div>
           <p className="mt-2 text-xs text-zinc-500">

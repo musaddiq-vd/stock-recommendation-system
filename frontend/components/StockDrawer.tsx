@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { createChart, ColorType, LineStyle } from "lightweight-charts";
-import { get, Pick, post, TIER_STYLE } from "@/lib/api";
+import { get, isExpired, Pick, post, RISK_STYLE, TIER_STYLE } from "@/lib/api";
 import { inr, positionSize, Settings } from "@/lib/sizing";
 import { useEscape } from "@/lib/useEscape";
 import { GATE_HINT, GATE_LABEL } from "./PickCard";
@@ -83,6 +83,7 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, 
   const r = pick.research;
   const t = TIER_STYLE[pick.tier];
   const hold = pick.hold_days.split("-").pop();
+  const expired = isExpired(pick);
   // the levels are distances from the fill (ATR multiples), exactly how the backtest and the track record measure them
   const dTarget = (pick.levels.target - pick.levels.entry).toFixed(2);
   const dStop = (pick.levels.entry - pick.levels.stop_loss).toFixed(2);
@@ -152,9 +153,68 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, 
           <Stat k={`Stop (-${pick.levels.stop_pct}%)`} v={`₹${pick.levels.stop_loss}`} cls="text-red-400" />
         </div>
 
+        {(pick.why?.length || pick.risk || pick.price_check) && (
+          <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
+            {pick.why && pick.why.length > 0 && (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+                <div className="text-sm font-semibold text-zinc-200">Why the model ranks it here</div>
+                <div className="mt-2 space-y-1.5">
+                  {pick.why.map((w) => {
+                    const max = Math.max(...pick.why!.map((x) => Math.abs(x.effect)));
+                    return (
+                      <div key={w.feature} className="grid grid-cols-[minmax(0,1fr)_64px_72px] items-center gap-2 text-xs">
+                        <span className="truncate text-zinc-300" title={w.feature}>{w.label}</span>
+                        <span className="text-right text-zinc-400">{w.value}</span>
+                        <div className="h-2 overflow-hidden rounded bg-zinc-800">
+                          <div className={`h-full ${w.effect > 0 ? "bg-emerald-500" : "bg-red-500"}`}
+                            style={{ width: `${(Math.abs(w.effect) / max) * 100}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-[11px] text-zinc-500">
+                  The model&apos;s own breakdown of this score (SHAP values): green raised it, red lowered it. It explains the ranking; it is not a
+                  separate check.
+                </p>
+              </div>
+            )}
+            <div className="space-y-3">
+              {pick.risk && (
+                <div className={`rounded-xl border p-3 text-xs ${RISK_STYLE[pick.risk.level].cls}`}>
+                  <div className="text-sm font-semibold">{RISK_STYLE[pick.risk.level].label}</div>
+                  <div className="mt-1 text-zinc-400">Because the {pick.risk.reasons.join("; ")}.</div>
+                  <div className="mt-1 text-zinc-500">Low: stop under 5% away. Medium: 5–9%. High: 9% or more, or an event or negative news.</div>
+                </div>
+              )}
+              {pick.price_check && pick.price_check.status !== "unavailable" && (
+                <div className={`rounded-xl border p-3 text-xs ${pick.price_check.status === "ok" ? "border-zinc-800 text-zinc-400" : "border-red-900 bg-red-950/30 text-red-200"}`}>
+                  <div className="font-semibold text-zinc-200">Price check</div>
+                  Yahoo close ₹{pick.price_check.yahoo_close} vs NSE official ₹{pick.price_check.nse_close} ({pick.price_check.diff_pct! > 0 ? "+" : ""}
+                  {pick.price_check.diff_pct}%){pick.price_check.status === "ok" ? ": they agree." : ": they disagree by more than 1%, so this cannot be a Buy."}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {pick.sector_cap && (
+          <div className="mt-4 rounded-xl border border-amber-800/80 bg-amber-950/20 px-4 py-3 text-sm text-amber-200">
+            <b>Sector limit.</b> This scan already has 2 better-ranked Buy calls in {pick.sector}. Take this one only if you hold fewer than 2 open
+            trades in this sector: spreading across sectors cut the worst drawdown in the 22-year test.
+          </div>
+        )}
+
+        {expired && (
+          <div className="mt-4 rounded-xl border border-zinc-700 bg-zinc-900/60 px-4 py-3 text-sm text-zinc-300">
+            <b className="text-white">Expired.</b> This pick was meant for the open of {pick.valid_until}, and that session has started. Use it for
+            study only; the next scan brings fresh picks.
+          </div>
+        )}
+
         <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
           <div className="text-sm font-semibold text-zinc-200">
-            {pick.tier === "strong" ? "How to take this trade" : "How this trade would be taken"}
+            {pick.tier === "strong" && !expired ? "How to take this trade" : "How this trade would be taken"}
           </div>
           {pick.tier !== "strong" && (
             <p className="mt-1 text-xs text-amber-300">
@@ -163,8 +223,8 @@ export default function StockDrawer({ pick, onClose, settings, scanId, onPaper, 
           )}
           <ol className="mt-2 space-y-1.5 text-xs text-zinc-300">
             <Step n={1}>
-              <b className="text-white">Buy at the next session&apos;s open</b> (the first trading day after {pick.as_of}). Note the price you
-              actually paid.
+              <b className="text-white">Buy at the next session&apos;s open</b> ({pick.valid_until ? `the open of ${pick.valid_until}` : `the first trading day after ${pick.as_of}`}).
+              Note the price you actually paid.
             </Step>
             <Step n={2}>
               <b className="text-white">Place both exits from your buy price:</b> target = buy price{" "}
